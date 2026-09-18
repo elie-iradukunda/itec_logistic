@@ -2,6 +2,9 @@
 
 namespace Controllers;
 
+use Models\AuditLog;
+use Models\UserRepository;
+
 class HomeController
 {
     public function index(): void
@@ -25,15 +28,30 @@ class HomeController
         $email = trim((string) ($_POST['email'] ?? ''));
         $password = (string) ($_POST['password'] ?? '');
         $accounts = \demo_accounts();
+        $repository = new UserRepository();
+        $user = $repository->findActiveByEmail($email);
 
-        if (!isset($accounts[$role]) || strcasecmp($accounts[$role]['email'], $email) !== 0 || $password !== 'password') {
+        if (
+            $user === null ||
+            !isset($accounts[$role]) ||
+            $user['role_key'] !== $role ||
+            !password_verify($password, $user['password_hash'])
+        ) {
+            AuditLog::record('auth.login_failed', 'user', null, 'Invalid login attempt.', [
+                'email' => $email,
+                'role' => $role,
+            ]);
             $this->redirectHome('login_error=1#login');
         }
 
+        $repository->touchLastLogin((int) $user['id']);
         $_SESSION['logistics_authenticated'] = true;
         $_SESSION['logistics_role'] = $role;
-        $_SESSION['logistics_user_name'] = $accounts[$role]['name'];
-        $_SESSION['logistics_user_email'] = $accounts[$role]['email'];
+        $_SESSION['logistics_user_id'] = (int) $user['id'];
+        $_SESSION['logistics_user_name'] = $user['full_name'];
+        $_SESSION['logistics_user_email'] = $user['email'];
+
+        AuditLog::record('auth.login', 'user', (string) $user['id']);
 
         header('Location: ' . $this->url('dashboard'));
         exit;
@@ -41,9 +59,12 @@ class HomeController
 
     public function logout(): void
     {
+        AuditLog::record('auth.logout', 'user', \current_user_id() !== null ? (string) \current_user_id() : null);
+
         unset(
             $_SESSION['logistics_authenticated'],
             $_SESSION['logistics_role'],
+            $_SESSION['logistics_user_id'],
             $_SESSION['logistics_user_name'],
             $_SESSION['logistics_user_email']
         );

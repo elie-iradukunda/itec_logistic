@@ -87,6 +87,11 @@ function current_user_email(): string
     return $_SESSION['logistics_user_email'] ?? ($accounts[$role]['email'] ?? '');
 }
 
+function current_user_id(): ?int
+{
+    return isset($_SESSION['logistics_user_id']) ? (int) $_SESSION['logistics_user_id'] : null;
+}
+
 if (PHP_SAPI === 'cli-server') {
     $config['app']['base_url'] = '';
 }

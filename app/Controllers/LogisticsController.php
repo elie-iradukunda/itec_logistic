@@ -3,6 +3,7 @@
 namespace Controllers;
 
 use Models\LogisticsData;
+use Models\AuditLog;
 
 class LogisticsController
 {
@@ -36,15 +37,54 @@ class LogisticsController
                     header('Location: ?route=' . urlencode($key) . '&error=delete_reason');
                     exit;
                 }
-                LogisticsData::delete($key, $id, $reason);
+                try {
+                    LogisticsData::delete($key, $id, $reason);
+                } catch (\Throwable) {
+                    header('Location: ?route=' . urlencode($key) . '&error=delete_failed');
+                    exit;
+                }
             } elseif ($action === 'toggle' && $id !== null) {
                 LogisticsData::setStatus($key, $id, (int) ($_POST['status'] ?? 0));
             } elseif ($action === 'create' || $action === 'edit') {
                 $values = [];
                 foreach (LogisticsData::module($key)['columns'] as $index => $column) {
-                    $values[] = trim((string) ($_POST['field_' . $index] ?? ''));
+                    $values[] = trim((string) ($_POST['field_' . $index] ?? ($_POST['existing_field_' . $index] ?? '')));
                 }
-                LogisticsData::save($key, $id, $values);
+                $errors = LogisticsData::validate($key, $values, $_FILES);
+                if ($errors !== []) {
+                    $module = LogisticsData::module($key);
+                    \view('modules/index', [
+                        'title' => $module['title'],
+                        'moduleKey' => $key,
+                        'module' => $module,
+                        'action' => $action,
+                        'saved' => false,
+                        'record' => $values,
+                        'audit' => LogisticsData::auditLog(),
+                        'error' => null,
+                        'errors' => $errors,
+                        'reportType' => '',
+                    ]);
+                    return;
+                }
+                try {
+                    LogisticsData::save($key, $id, $values, $_FILES);
+                } catch (\Throwable $exception) {
+                    $module = LogisticsData::module($key);
+                    \view('modules/index', [
+                        'title' => $module['title'],
+                        'moduleKey' => $key,
+                        'module' => $module,
+                        'action' => $action,
+                        'saved' => false,
+                        'record' => $values,
+                        'audit' => LogisticsData::auditLog(),
+                        'error' => null,
+                        'errors' => ['Unable to save record: ' . $exception->getMessage()],
+                        'reportType' => '',
+                    ]);
+                    return;
+                }
             }
             header('Location: ?route=' . urlencode($key) . '&saved=1');
             exit;
@@ -84,6 +124,7 @@ class LogisticsController
         $filename = 'itec-logistics-reports-' . date('Y-m-d') . '.csv';
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
+        AuditLog::record('report.exported', 'reports', $id, null, ['report_type' => $reportType]);
         $output = fopen('php://output', 'wb');
         fputcsv($output, $module['columns']);
         foreach ($rows as $row) {

@@ -4,6 +4,8 @@ ITEC Logistics MVC is a PHP-based logistics management system for planning, moni
 
 The project is built as a separate lightweight MVC application and does not modify the existing Xode application.
 
+The current version is fully database-backed: authentication reads real users from MySQL, module actions save to the database, audit activity is persisted, uploads are stored on disk, migrations are available for existing installations, and smoke tests cover the main workflow.
+
 ## What The System Does
 
 The system helps logistics teams answer daily operational questions:
@@ -25,18 +27,24 @@ The goal is to make logistics activity visible, controlled, and accountable from
 
 - Public home page with system overview and login panel.
 - Demo login by role with automatic email selection.
-- Session-based authentication and logout.
+- Password verification against the seeded `users` table.
+- Session-based authentication and logout after database login.
 - Role-based access control for dashboards and modules.
 - Role-specific dashboards with operational metrics.
 - Sidebar navigation that changes based on the logged-in role.
-- CRUD-style screens for logistics records.
+- Database-backed CRUD-style screens for logistics records.
 - Searchable and filterable module tables.
 - View, create, edit, toggle status, and delete records.
 - Delete confirmation with a required reason.
+- Server-side validation for required fields, option values, dates, numbers, and upload types.
+- File upload handling for delivery proof files, signatures, and fuel receipts.
+- Persistent audit logs for login, failed login, logout, create, update, delete, status change, and report export actions.
 - CSV export for reports.
 - Light/dark theme switcher from the dashboard layout.
 - MySQL/MariaDB schema for logistics data.
+- Migration runner for existing database updates.
 - Idempotent seed file that can be run multiple times safely.
+- Automated smoke test for database import, login data, role access, CRUD persistence, reports, and audit logging.
 
 ## User Roles
 
@@ -156,13 +164,14 @@ The schema creates these tables:
 - inventory_items
 - suppliers
 - purchase_requests
+- reports
 - audit_logs
 
 The seed file includes realistic starter data for all main tables and is idempotent. You can run it again without duplicating the seeded records.
 
-## Important Current Data Note
+## Current Data Implementation
 
-The database schema and seed data are ready. The current module screens still use session-backed demo records from `app/Models/LogisticsData.php` for fast UI interaction. This means create, edit, delete, and status toggle actions update the current browser session. The database layer is prepared for the next step, where each module can be connected to real MySQL repositories.
+Module records are read from and written to MySQL through `app/Models/LogisticsData.php`. Login uses `app/Models/UserRepository.php` and verifies `users.password_hash`. Audit actions are stored in `audit_logs` through `app/Models/AuditLog.php`. Uploaded delivery and fuel files are saved under `storage/uploads/`.
 
 ## Tech Stack
 
@@ -173,6 +182,7 @@ The database schema and seed data are ready. The current module screens still us
 - jQuery DataTables
 - Select2
 - XAMPP-friendly local setup
+- Plain PHP smoke tests
 
 ## Project Structure
 
@@ -185,6 +195,10 @@ The database schema and seed data are ready. The current module screens still us
 - `config/config.php` - app and database configuration
 - `database/schema.sql` - database schema
 - `database/seed.sql` - starter data
+- `database/migrations/` - incremental schema updates for existing databases
+- `scripts/migrate.php` - migration runner
+- `tests/smoke.php` - automated smoke test
+- `storage/uploads/` - runtime upload location for proofs, signatures, and receipts
 - `public/assets/` - CSS, JavaScript, images, fonts, and UI assets
 
 ## Run Locally
@@ -236,6 +250,13 @@ C:\xampp\mysql\bin\mysql.exe -u root -p < database/schema.sql
 C:\xampp\mysql\bin\mysql.exe -u root -p logistics_mvc < database/seed.sql
 ```
 
+For an existing database that already has the older schema, run the migration script first, then re-run the seed file:
+
+```text
+C:\xampp\php\php.exe scripts\migrate.php
+C:\xampp\mysql\bin\mysql.exe -u root logistics_mvc < database/seed.sql
+```
+
 Environment variables can override database settings:
 
 - `LOGISTICS_DB_HOST`
@@ -244,6 +265,16 @@ Environment variables can override database settings:
 - `LOGISTICS_DB_PASS`
 
 See `.env.example` for the expected values.
+
+## Tests
+
+Run the smoke test from the project root:
+
+```text
+C:\xampp\php\php.exe tests\smoke.php
+```
+
+The test creates a temporary database, imports the schema and seed data, verifies the seeded login password, checks role module access, performs a vehicle create/status workflow, confirms report data, writes an audit log, and drops the temporary database when finished.
 
 ## Main Routes
 
@@ -264,12 +295,22 @@ See `.env.example` for the expected values.
 - `?route=reports` - reports module
 - `?route=users` - users and permissions module
 
-## Suggested Next Improvements
+## Completed Improvement Checklist
 
-- Connect each module to MySQL repositories instead of session-backed demo records.
-- Add real password verification against the `users` table.
-- Add migrations for schema changes.
-- Add server-side validation for module forms.
-- Add file upload handling for delivery proofs, signatures, receipts, and documents.
-- Add audit-log persistence for create, update, status change, delete, login, and export actions.
-- Add automated tests for role access, login, CRUD actions, and report export.
+These items are implemented in the current codebase:
+
+- Each module is connected to MySQL-backed data operations.
+- Login verifies passwords against the `users` table.
+- Schema changes are captured in `database/migrations/`.
+- Module forms have server-side validation.
+- Delivery and fuel upload fields are handled by the application.
+- Audit logs are persisted for authentication, module changes, status changes, deletion, and report export.
+- Automated smoke tests cover login data, role access, CRUD persistence, reports, and audit logging.
+
+## Optional Future Enhancements
+
+- Add CSRF tokens to all POST forms.
+- Add pagination and server-side DataTables processing for very large datasets.
+- Add password reset and user password-change screens.
+- Add stricter file download permissions for uploaded proofs and receipts.
+- Add deployment notes for shared hosting or a production web server.

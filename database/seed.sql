@@ -49,6 +49,17 @@ ON DUPLICATE KEY UPDATE
     license_expiry = VALUES(license_expiry),
     status = VALUES(status);
 
+UPDATE vehicles SET assigned_driver_id = (SELECT id FROM drivers WHERE license_number = 'RWA-DL-0912') WHERE plate_number = 'RAC 482D';
+UPDATE vehicles SET assigned_driver_id = (SELECT id FROM drivers WHERE license_number = 'RWA-DL-1028') WHERE plate_number = 'RAB 118K';
+UPDATE vehicles SET assigned_driver_id = (SELECT id FROM drivers WHERE license_number = 'RWA-DL-0744') WHERE plate_number = 'RAC 901P';
+UPDATE vehicles SET assigned_driver_id = NULL WHERE plate_number = 'RAB 332M';
+UPDATE vehicles SET assigned_driver_id = (SELECT id FROM drivers WHERE license_number = 'RWA-DL-0987') WHERE plate_number = 'RAC 774F';
+UPDATE vehicles SET assigned_driver_id = (SELECT id FROM drivers WHERE license_number = 'RWA-DL-1102') WHERE plate_number = 'RAB 640C';
+UPDATE vehicles SET assigned_driver_id = (SELECT id FROM drivers WHERE license_number = 'RWA-DL-1214') WHERE plate_number = 'RAC 208L';
+UPDATE vehicles SET assigned_driver_id = (SELECT id FROM drivers WHERE license_number = 'RWA-DL-0861') WHERE plate_number = 'RAB 519T';
+UPDATE vehicles SET assigned_driver_id = NULL WHERE plate_number = 'RAC 863N';
+UPDATE vehicles SET assigned_driver_id = (SELECT id FROM drivers WHERE license_number = 'RWA-DL-1168') WHERE plate_number = 'RAB 407G';
+
 UPDATE warehouses
 SET location = 'Kigali', status = 'active'
 WHERE warehouse_name = 'Kigali Central Warehouse';
@@ -105,80 +116,87 @@ INSERT INTO suppliers (supplier_name, contact_name, phone, email, status)
 SELECT 'Fleet Workshop', 'Operations desk', '+250 788 404 040', 'workshop@itec.rw', 'active'
 WHERE NOT EXISTS (SELECT 1 FROM suppliers WHERE supplier_name = 'Fleet Workshop');
 
-INSERT INTO users (role_id, full_name, email, password_hash, phone, status, last_login_at)
-SELECT id, 'Admin User', 'admin@itec.rw', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', '+250 788 000 001', 'active', '2026-09-18 09:00:00'
+INSERT INTO users (role_id, full_name, email, password_hash, phone, department, status, last_login_at)
+SELECT id, 'Admin User', 'admin@itec.rw', '$2y$10$xT3CpwhBWfjZdDjM1qVKleYlvscj7OR0UTKfa2gCdgF4EqHt67ea6', '+250 788 000 001', 'Administration', 'active', '2026-09-18 09:00:00'
 FROM roles WHERE role_key = 'super_admin'
 ON DUPLICATE KEY UPDATE
     role_id = VALUES(role_id),
     full_name = VALUES(full_name),
     password_hash = VALUES(password_hash),
     phone = VALUES(phone),
+    department = VALUES(department),
     status = VALUES(status),
     last_login_at = VALUES(last_login_at);
 
-INSERT INTO users (role_id, full_name, email, password_hash, phone, status, last_login_at)
-SELECT id, 'Aline Mukamana', 'aline@itec.rw', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', '+250 788 202 020', 'active', '2026-09-18 08:42:00'
+INSERT INTO users (role_id, full_name, email, password_hash, phone, department, status, last_login_at)
+SELECT id, 'Aline Mukamana', 'aline@itec.rw', '$2y$10$xT3CpwhBWfjZdDjM1qVKleYlvscj7OR0UTKfa2gCdgF4EqHt67ea6', '+250 788 202 020', 'Operations', 'active', '2026-09-18 08:42:00'
 FROM roles WHERE role_key = 'logistics_manager'
 ON DUPLICATE KEY UPDATE
     role_id = VALUES(role_id),
     full_name = VALUES(full_name),
     password_hash = VALUES(password_hash),
     phone = VALUES(phone),
+    department = VALUES(department),
     status = VALUES(status),
     last_login_at = VALUES(last_login_at);
 
-INSERT INTO users (role_id, full_name, email, password_hash, phone, status, last_login_at)
-SELECT id, 'Samuel Niyonzima', 'samuel@itec.rw', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', '+250 788 632 119', 'active', '2026-09-18 06:18:00'
+INSERT INTO users (role_id, full_name, email, password_hash, phone, department, status, last_login_at)
+SELECT id, 'Samuel Niyonzima', 'samuel@itec.rw', '$2y$10$xT3CpwhBWfjZdDjM1qVKleYlvscj7OR0UTKfa2gCdgF4EqHt67ea6', '+250 788 632 119', 'Fleet', 'active', '2026-09-18 06:18:00'
 FROM roles WHERE role_key = 'driver'
 ON DUPLICATE KEY UPDATE
     role_id = VALUES(role_id),
     full_name = VALUES(full_name),
     password_hash = VALUES(password_hash),
     phone = VALUES(phone),
+    department = VALUES(department),
     status = VALUES(status),
     last_login_at = VALUES(last_login_at);
 
-INSERT INTO users (role_id, full_name, email, password_hash, phone, status, last_login_at)
-SELECT id, 'Eric Murenzi', 'eric@itec.rw', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', '+250 783 210 084', 'active', '2026-09-17 16:20:00'
+INSERT INTO users (role_id, full_name, email, password_hash, phone, department, status, last_login_at)
+SELECT id, 'Eric Murenzi', 'eric@itec.rw', '$2y$10$xT3CpwhBWfjZdDjM1qVKleYlvscj7OR0UTKfa2gCdgF4EqHt67ea6', '+250 783 210 084', 'Fleet', 'active', '2026-09-17 16:20:00'
 FROM roles WHERE role_key = 'fleet_manager'
 ON DUPLICATE KEY UPDATE
     role_id = VALUES(role_id),
     full_name = VALUES(full_name),
     password_hash = VALUES(password_hash),
     phone = VALUES(phone),
+    department = VALUES(department),
     status = VALUES(status),
     last_login_at = VALUES(last_login_at);
 
-INSERT INTO users (role_id, full_name, email, password_hash, phone, status, last_login_at)
-SELECT id, 'Nadine Tuyisenge', 'nadine@itec.rw', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', '+250 782 110 554', 'active', '2026-09-16 09:35:00'
+INSERT INTO users (role_id, full_name, email, password_hash, phone, department, status, last_login_at)
+SELECT id, 'Nadine Tuyisenge', 'nadine@itec.rw', '$2y$10$xT3CpwhBWfjZdDjM1qVKleYlvscj7OR0UTKfa2gCdgF4EqHt67ea6', '+250 782 110 554', 'Warehouse', 'active', '2026-09-16 09:35:00'
 FROM roles WHERE role_key = 'warehouse_manager'
 ON DUPLICATE KEY UPDATE
     role_id = VALUES(role_id),
     full_name = VALUES(full_name),
     password_hash = VALUES(password_hash),
     phone = VALUES(phone),
+    department = VALUES(department),
     status = VALUES(status),
     last_login_at = VALUES(last_login_at);
 
-INSERT INTO users (role_id, full_name, email, password_hash, phone, status, last_login_at)
-SELECT id, 'Emmanuel Safari', 'emmanuel@itec.rw', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', '+250 788 705 881', 'active', '2026-09-15 11:05:00'
+INSERT INTO users (role_id, full_name, email, password_hash, phone, department, status, last_login_at)
+SELECT id, 'Emmanuel Safari', 'emmanuel@itec.rw', '$2y$10$xT3CpwhBWfjZdDjM1qVKleYlvscj7OR0UTKfa2gCdgF4EqHt67ea6', '+250 788 705 881', 'Finance', 'active', '2026-09-15 11:05:00'
 FROM roles WHERE role_key = 'finance'
 ON DUPLICATE KEY UPDATE
     role_id = VALUES(role_id),
     full_name = VALUES(full_name),
     password_hash = VALUES(password_hash),
     phone = VALUES(phone),
+    department = VALUES(department),
     status = VALUES(status),
     last_login_at = VALUES(last_login_at);
 
-INSERT INTO users (role_id, full_name, email, password_hash, phone, status, last_login_at)
-SELECT id, 'Jean Pierre Habimana', 'jeanpierre@itec.rw', '$2y$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2uheWG/igi', '+250 788 512 030', 'active', '2026-09-14 14:10:00'
+INSERT INTO users (role_id, full_name, email, password_hash, phone, department, status, last_login_at)
+SELECT id, 'Jean Pierre Habimana', 'jeanpierre@itec.rw', '$2y$10$xT3CpwhBWfjZdDjM1qVKleYlvscj7OR0UTKfa2gCdgF4EqHt67ea6', '+250 788 512 030', 'Management', 'active', '2026-09-14 14:10:00'
 FROM roles WHERE role_key = 'management'
 ON DUPLICATE KEY UPDATE
     role_id = VALUES(role_id),
     full_name = VALUES(full_name),
     password_hash = VALUES(password_hash),
     phone = VALUES(phone),
+    department = VALUES(department),
     status = VALUES(status),
     last_login_at = VALUES(last_login_at);
 
@@ -271,48 +289,96 @@ ON DUPLICATE KEY UPDATE
     amount = VALUES(amount),
     status = VALUES(status);
 
-INSERT INTO fuel_records (vehicle_id, station_name, litres, unit_price, mileage, purchased_at, receipt_file)
-SELECT (SELECT id FROM vehicles WHERE plate_number = 'RAC 482D'), 'SP Kigali', 82.00, 1540.00, 84210, '2026-09-18 07:55:00', 'receipts/fue-0198.pdf'
+UPDATE fuel_records
+SET reference_code = 'FUE-0198'
+WHERE reference_code IS NULL
+  AND vehicle_id = (SELECT id FROM vehicles WHERE plate_number = 'RAC 482D')
+  AND station_name = 'SP Kigali'
+  AND purchased_at = '2026-09-18 07:55:00';
+
+UPDATE fuel_records
+SET reference_code = 'FUE-0197'
+WHERE reference_code IS NULL
+  AND vehicle_id = (SELECT id FROM vehicles WHERE plate_number = 'RAB 118K')
+  AND station_name = 'Kobil Remera'
+  AND purchased_at = '2026-09-18 06:25:00';
+
+UPDATE fuel_records
+SET reference_code = 'FUE-0196'
+WHERE reference_code IS NULL
+  AND vehicle_id = (SELECT id FROM vehicles WHERE plate_number = 'RAC 901P')
+  AND station_name = 'SP Nyabugogo'
+  AND purchased_at = '2026-09-17 16:45:00';
+
+INSERT INTO fuel_records (reference_code, vehicle_id, station_name, litres, unit_price, mileage, purchased_at, receipt_file)
+SELECT 'FUE-0198', (SELECT id FROM vehicles WHERE plate_number = 'RAC 482D'), 'SP Kigali', 82.00, 1540.00, 84210, '2026-09-18 07:55:00', 'receipts/fue-0198.pdf'
 WHERE NOT EXISTS (
     SELECT 1 FROM fuel_records
-    WHERE vehicle_id = (SELECT id FROM vehicles WHERE plate_number = 'RAC 482D')
-      AND station_name = 'SP Kigali'
-      AND purchased_at = '2026-09-18 07:55:00'
+    WHERE reference_code = 'FUE-0198'
 );
 
-INSERT INTO fuel_records (vehicle_id, station_name, litres, unit_price, mileage, purchased_at, receipt_file)
-SELECT (SELECT id FROM vehicles WHERE plate_number = 'RAB 118K'), 'Kobil Remera', 54.00, 1540.00, 62100, '2026-09-18 06:25:00', 'receipts/fue-0197.pdf'
+INSERT INTO fuel_records (reference_code, vehicle_id, station_name, litres, unit_price, mileage, purchased_at, receipt_file)
+SELECT 'FUE-0197', (SELECT id FROM vehicles WHERE plate_number = 'RAB 118K'), 'Kobil Remera', 54.00, 1540.00, 62100, '2026-09-18 06:25:00', 'receipts/fue-0197.pdf'
 WHERE NOT EXISTS (
     SELECT 1 FROM fuel_records
-    WHERE vehicle_id = (SELECT id FROM vehicles WHERE plate_number = 'RAB 118K')
-      AND station_name = 'Kobil Remera'
-      AND purchased_at = '2026-09-18 06:25:00'
+    WHERE reference_code = 'FUE-0197'
 );
 
-INSERT INTO fuel_records (vehicle_id, station_name, litres, unit_price, mileage, purchased_at, receipt_file)
-SELECT (SELECT id FROM vehicles WHERE plate_number = 'RAC 901P'), 'SP Nyabugogo', 68.00, 1540.00, 119800, '2026-09-17 16:45:00', 'receipts/fue-0196.pdf'
+INSERT INTO fuel_records (reference_code, vehicle_id, station_name, litres, unit_price, mileage, purchased_at, receipt_file)
+SELECT 'FUE-0196', (SELECT id FROM vehicles WHERE plate_number = 'RAC 901P'), 'SP Nyabugogo', 68.00, 1540.00, 119800, '2026-09-17 16:45:00', 'receipts/fue-0196.pdf'
 WHERE NOT EXISTS (
     SELECT 1 FROM fuel_records
-    WHERE vehicle_id = (SELECT id FROM vehicles WHERE plate_number = 'RAC 901P')
-      AND station_name = 'SP Nyabugogo'
-      AND purchased_at = '2026-09-17 16:45:00'
+    WHERE reference_code = 'FUE-0196'
 );
 
-INSERT INTO expenses (trip_id, vehicle_id, category, amount, expense_date, notes)
-SELECT NULL, (SELECT id FROM vehicles WHERE plate_number = 'RAC 482D'), 'Fuel', 126280.00, '2026-09-18', 'EXP-0441 - Approved fuel posting for RAC 482D.'
-WHERE NOT EXISTS (SELECT 1 FROM expenses WHERE notes LIKE 'EXP-0441%');
+UPDATE expenses
+SET reference_code = 'EXP-0441', submitted_by = (SELECT id FROM users WHERE email = 'aline@itec.rw'), status = 'approved'
+WHERE reference_code IS NULL AND notes LIKE 'EXP-0441%';
 
-INSERT INTO expenses (trip_id, vehicle_id, category, amount, expense_date, notes)
-SELECT (SELECT id FROM trips WHERE reference_code = 'TRP-0247'), NULL, 'Toll', 8000.00, '2026-09-18', 'EXP-0440 - Toll submitted for TRP-0247.'
-WHERE NOT EXISTS (SELECT 1 FROM expenses WHERE notes LIKE 'EXP-0440%');
+UPDATE expenses
+SET reference_code = 'EXP-0440', submitted_by = (SELECT id FROM users WHERE email = 'samuel@itec.rw'), status = 'pending'
+WHERE reference_code IS NULL AND notes LIKE 'EXP-0440%';
 
-INSERT INTO expenses (trip_id, vehicle_id, category, amount, expense_date, notes)
-SELECT NULL, (SELECT id FROM vehicles WHERE plate_number = 'RAC 901P'), 'Repair', 245000.00, '2026-09-17', 'EXP-0439 - Brake repair work order support.'
-WHERE NOT EXISTS (SELECT 1 FROM expenses WHERE notes LIKE 'EXP-0439%');
+UPDATE expenses
+SET reference_code = 'EXP-0439', submitted_by = (SELECT id FROM users WHERE email = 'eric@itec.rw'), status = 'approved'
+WHERE reference_code IS NULL AND notes LIKE 'EXP-0439%';
 
-INSERT INTO expenses (trip_id, vehicle_id, category, amount, expense_date, notes)
-SELECT (SELECT id FROM trips WHERE reference_code = 'TRP-0248'), (SELECT id FROM vehicles WHERE plate_number = 'RAC 482D'), 'Allowance', 45000.00, '2026-09-18', 'EXP-0438 - Driver route allowance for TRP-0248.'
-WHERE NOT EXISTS (SELECT 1 FROM expenses WHERE notes LIKE 'EXP-0438%');
+UPDATE expenses
+SET reference_code = 'EXP-0438', submitted_by = (SELECT id FROM users WHERE email = 'samuel@itec.rw'), status = 'approved'
+WHERE reference_code IS NULL AND notes LIKE 'EXP-0438%';
+
+INSERT INTO expenses (reference_code, trip_id, vehicle_id, category, amount, submitted_by, status, expense_date, notes)
+SELECT 'EXP-0441', NULL, (SELECT id FROM vehicles WHERE plate_number = 'RAC 482D'), 'Fuel', 126280.00, (SELECT id FROM users WHERE email = 'aline@itec.rw'), 'approved', '2026-09-18', 'Approved fuel posting for RAC 482D.'
+WHERE NOT EXISTS (SELECT 1 FROM expenses WHERE reference_code = 'EXP-0441');
+
+INSERT INTO expenses (reference_code, trip_id, vehicle_id, category, amount, submitted_by, status, expense_date, notes)
+SELECT 'EXP-0440', (SELECT id FROM trips WHERE reference_code = 'TRP-0247'), NULL, 'Toll', 8000.00, (SELECT id FROM users WHERE email = 'samuel@itec.rw'), 'pending', '2026-09-18', 'Toll submitted for TRP-0247.'
+WHERE NOT EXISTS (SELECT 1 FROM expenses WHERE reference_code = 'EXP-0440');
+
+INSERT INTO expenses (reference_code, trip_id, vehicle_id, category, amount, submitted_by, status, expense_date, notes)
+SELECT 'EXP-0439', NULL, (SELECT id FROM vehicles WHERE plate_number = 'RAC 901P'), 'Repair', 245000.00, (SELECT id FROM users WHERE email = 'eric@itec.rw'), 'approved', '2026-09-17', 'Brake repair work order support.'
+WHERE NOT EXISTS (SELECT 1 FROM expenses WHERE reference_code = 'EXP-0439');
+
+INSERT INTO expenses (reference_code, trip_id, vehicle_id, category, amount, submitted_by, status, expense_date, notes)
+SELECT 'EXP-0438', (SELECT id FROM trips WHERE reference_code = 'TRP-0248'), (SELECT id FROM vehicles WHERE plate_number = 'RAC 482D'), 'Allowance', 45000.00, (SELECT id FROM users WHERE email = 'samuel@itec.rw'), 'approved', '2026-09-18', 'Driver route allowance for TRP-0248.'
+WHERE NOT EXISTS (SELECT 1 FROM expenses WHERE reference_code = 'EXP-0438');
+
+INSERT INTO reports (report_name, period_label, owner_name, last_generated_at, format_label, action_label) VALUES
+('Vehicle utilization', 'September 2026', 'Fleet manager', '2026-09-18 09:42:00', 'PDF', 'View'),
+('Fuel consumption', 'September 2026', 'Finance', '2026-09-17 16:20:00', 'Excel', 'View'),
+('Delivery performance', 'Q3 2026', 'Operations', '2026-09-15 10:00:00', 'PDF', 'View'),
+('Maintenance cost', 'September 2026', 'Fleet manager', '2026-09-18 11:00:00', 'PDF', 'View'),
+('Driver performance', 'September 2026', 'Fleet manager', '2026-09-18 11:05:00', 'Excel', 'View'),
+('Inventory movement', 'September 2026', 'Warehouse', '2026-09-18 11:10:00', 'Excel', 'View'),
+('Trip profitability', 'September 2026', 'Finance', '2026-09-18 11:15:00', 'PDF', 'View'),
+('Open requests', 'September 2026', 'Operations', '2026-09-18 11:20:00', 'CSV', 'View'),
+('Expense summary', 'September 2026', 'Finance', '2026-09-18 11:25:00', 'Excel', 'View')
+ON DUPLICATE KEY UPDATE
+    period_label = VALUES(period_label),
+    owner_name = VALUES(owner_name),
+    last_generated_at = VALUES(last_generated_at),
+    format_label = VALUES(format_label),
+    action_label = VALUES(action_label);
 
 INSERT INTO audit_logs (user_id, action_name, entity_type, entity_id, reason, metadata)
 SELECT (SELECT id FROM users WHERE email = 'aline@itec.rw'), 'seed.created', 'database', 'seed-2026-09-18', 'Initial logistics seed data loaded.', '{"source":"database/seed.sql"}'

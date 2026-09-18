@@ -6,6 +6,7 @@ CREATE TABLE vehicles (
     plate_number VARCHAR(32) NOT NULL UNIQUE,
     vehicle_type VARCHAR(80) NOT NULL,
     model VARCHAR(80) NULL,
+    assigned_driver_id INT UNSIGNED NULL,
     mileage INT UNSIGNED NOT NULL DEFAULT 0,
     status ENUM('available','on_trip','maintenance','inactive') NOT NULL DEFAULT 'available',
     next_service_date DATE NULL,
@@ -39,10 +40,13 @@ CREATE TABLE trips (
 
 CREATE TABLE expenses (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    reference_code VARCHAR(32) NULL UNIQUE,
     trip_id INT UNSIGNED NULL,
     vehicle_id INT UNSIGNED NULL,
     category VARCHAR(60) NOT NULL,
     amount DECIMAL(12,2) NOT NULL,
+    submitted_by INT UNSIGNED NULL,
+    status ENUM('pending','approved','rejected') NOT NULL DEFAULT 'pending',
     expense_date DATE NOT NULL,
     notes TEXT NULL,
     FOREIGN KEY (trip_id) REFERENCES trips(id) ON DELETE SET NULL,
@@ -62,6 +66,7 @@ CREATE TABLE users (
     email VARCHAR(190) NOT NULL UNIQUE,
     password_hash VARCHAR(255) NOT NULL,
     phone VARCHAR(40) NULL,
+    department VARCHAR(80) NULL,
     status ENUM('active','inactive','locked') NOT NULL DEFAULT 'active',
     last_login_at DATETIME NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -97,6 +102,7 @@ CREATE TABLE deliveries (
 
 CREATE TABLE fuel_records (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    reference_code VARCHAR(32) NULL UNIQUE,
     vehicle_id INT UNSIGNED NOT NULL,
     station_name VARCHAR(150) NOT NULL,
     litres DECIMAL(10,2) NOT NULL,
@@ -160,6 +166,16 @@ CREATE TABLE purchase_requests (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL,
     FOREIGN KEY (requested_by) REFERENCES users(id) ON DELETE SET NULL
+);
+
+CREATE TABLE reports (
+    id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    report_name VARCHAR(150) NOT NULL UNIQUE,
+    period_label VARCHAR(100) NOT NULL,
+    owner_name VARCHAR(100) NOT NULL,
+    last_generated_at DATETIME NULL,
+    format_label VARCHAR(20) NOT NULL DEFAULT 'CSV',
+    action_label VARCHAR(40) NOT NULL DEFAULT 'View'
 );
 
 CREATE TABLE audit_logs (
