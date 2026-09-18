@@ -6,6 +6,34 @@ namespace Models;
 
 class UserRepository extends BaseModel
 {
+    public function activeLoginAccounts(): array
+    {
+        $rows = $this->fetchAll(
+            'SELECT users.id, users.full_name, users.email, roles.role_key, roles.role_name
+             FROM users
+             INNER JOIN roles ON roles.id = users.role_id
+             WHERE users.status = "active"
+             ORDER BY FIELD(roles.role_key, "super_admin", "logistics_manager", "fleet_manager", "warehouse_manager", "driver", "finance", "management"), users.id'
+        );
+
+        $accounts = [];
+        foreach ($rows as $row) {
+            $roleKey = (string) $row['role_key'];
+            if (isset($accounts[$roleKey])) {
+                continue;
+            }
+
+            $accounts[$roleKey] = [
+                'id' => (int) $row['id'],
+                'name' => $row['full_name'],
+                'email' => $row['email'],
+                'role_name' => $row['role_name'],
+            ];
+        }
+
+        return $accounts;
+    }
+
     public function findActiveByEmail(string $email): ?array
     {
         return $this->fetchOne(

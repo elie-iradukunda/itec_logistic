@@ -42,6 +42,10 @@ try {
     $assert($admin !== null, 'admin demo user exists');
     $assert(password_verify('password', $admin['password_hash'] ?? ''), 'admin password verifies');
 
+    $loginAccounts = demo_accounts();
+    $assert(isset($loginAccounts['logistics_manager']), 'login account list reads logistics manager from database');
+    $assert(($loginAccounts['logistics_manager']['email'] ?? '') === 'aline@itec.rw', 'login account email comes from seeded database user');
+
     foreach (role_definitions() as $roleKey => $definition) {
         $_SESSION['logistics_authenticated'] = true;
         $_SESSION['logistics_role'] = $roleKey;

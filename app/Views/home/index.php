@@ -1,9 +1,12 @@
 <?php
 $baseUrl = config('app.base_url', '');
+$roleDefinitions = role_definitions();
+$accountRoles = array_intersect_key($roleDefinitions, $accounts);
 $selectedRole = (string) ($_GET['role'] ?? 'logistics_manager');
-if (!isset($accounts[$selectedRole])) {
-    $selectedRole = 'logistics_manager';
+if (!isset($accountRoles[$selectedRole])) {
+    $selectedRole = array_key_first($accountRoles) ?: '';
 }
+$selectedEmail = $selectedRole !== '' ? ($accounts[$selectedRole]['email'] ?? '') : '';
 ?>
 <!doctype html>
 <html lang="en">
@@ -65,10 +68,14 @@ if (!isset($accounts[$selectedRole])) {
           <div class="home-alert home-alert-success">You have been logged out.</div>
         <?php endif; ?>
 
+        <?php if ($accountRoles === []): ?>
+          <div class="home-alert home-alert-danger">No active database users were found. Run the schema and seed files, then refresh this page.</div>
+        <?php endif; ?>
+
         <form class="home-login-form" method="post" action="<?= $baseUrl ?>/?route=login">
           <label for="loginRole">Role</label>
-          <select id="loginRole" name="role" required>
-            <?php foreach (role_definitions() as $roleKey => $definition): ?>
+          <select id="loginRole" name="role" required <?= $accountRoles === [] ? 'disabled' : '' ?>>
+            <?php foreach ($accountRoles as $roleKey => $definition): ?>
               <option value="<?= htmlspecialchars($roleKey) ?>" data-email="<?= htmlspecialchars($accounts[$roleKey]['email'] ?? '') ?>" <?= $selectedRole === $roleKey ? 'selected' : '' ?>>
                 <?= htmlspecialchars($definition['label']) ?>
               </option>
@@ -76,21 +83,22 @@ if (!isset($accounts[$selectedRole])) {
           </select>
 
           <label for="loginEmail">Email</label>
-          <input id="loginEmail" name="email" type="email" value="<?= htmlspecialchars($accounts[$selectedRole]['email'] ?? '') ?>" autocomplete="username" required>
+          <input id="loginEmail" name="email" type="email" value="<?= htmlspecialchars($selectedEmail) ?>" autocomplete="username" required <?= $accountRoles === [] ? 'disabled' : '' ?>>
 
           <label for="loginPassword">Password</label>
-          <input id="loginPassword" name="password" type="password" value="password" autocomplete="current-password" required>
+          <input id="loginPassword" name="password" type="password" value="password" autocomplete="current-password" required <?= $accountRoles === [] ? 'disabled' : '' ?>>
 
-          <button class="button button-primary button-block" type="submit"><i class="fe fe-log-in"></i> Login to dashboard</button>
+          <button class="button button-primary button-block" type="submit" <?= $accountRoles === [] ? 'disabled' : '' ?>><i class="fe fe-log-in"></i> Login to dashboard</button>
         </form>
 
         <div class="demo-accounts">
-          <span>Demo accounts</span>
+          <span>Active database users</span>
           <ul>
             <?php foreach ($accounts as $roleKey => $account): ?>
+              <?php if (!isset($roleDefinitions[$roleKey])) { continue; } ?>
               <li>
                 <a href="<?= $baseUrl ?>/?route=home&role=<?= urlencode($roleKey) ?>#login">
-                  <?= htmlspecialchars(role_definitions()[$roleKey]['label'] ?? $roleKey) ?>
+                  <?= htmlspecialchars($roleDefinitions[$roleKey]['label']) ?>
                 </a>
                 <small><?= htmlspecialchars($account['email']) ?></small>
               </li>

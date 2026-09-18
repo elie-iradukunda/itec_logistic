@@ -58,17 +58,17 @@ The system includes these roles:
 - Finance: fuel, expenses, procurement, and reports access.
 - Management: dashboard and reports access.
 
-## Demo Login
+## Seeded Database Login
 
-Open the home page and use the login panel. Selecting a role fills the matching demo email automatically.
+Open the home page and use the login panel. The role list, email autofill, and account list come from active records in the `users` table joined to `roles`.
 
-All demo accounts use this password:
+All seeded login users use this password:
 
 ```text
 password
 ```
 
-Demo accounts:
+Seeded active users:
 
 | Role | Email |
 | --- | --- |

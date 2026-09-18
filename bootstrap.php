@@ -19,25 +19,6 @@ $roleDefinitions = [
     'management' => ['label' => 'Management', 'routes' => ['dashboard', 'reports']],
 ];
 
-$demoAccounts = [
-    'super_admin' => ['name' => 'Admin User', 'email' => 'admin@itec.rw'],
-    'logistics_manager' => ['name' => 'Aline Mukamana', 'email' => 'aline@itec.rw'],
-    'fleet_manager' => ['name' => 'Eric Murenzi', 'email' => 'eric@itec.rw'],
-    'warehouse_manager' => ['name' => 'Nadine Tuyisenge', 'email' => 'nadine@itec.rw'],
-    'driver' => ['name' => 'Samuel Niyonzima', 'email' => 'samuel@itec.rw'],
-    'finance' => ['name' => 'Emmanuel Safari', 'email' => 'emmanuel@itec.rw'],
-    'management' => ['name' => 'Jean Pierre Habimana', 'email' => 'jeanpierre@itec.rw'],
-];
-
-if (isset($_GET['role'], $roleDefinitions[$_GET['role']]) && is_logged_in()) {
-    $_SESSION['logistics_role'] = $_GET['role'];
-    $account = $demoAccounts[$_GET['role']] ?? null;
-    if ($account !== null) {
-        $_SESSION['logistics_user_name'] = $account['name'];
-        $_SESSION['logistics_user_email'] = $account['email'];
-    }
-}
-
 function is_logged_in(): bool
 {
     return (bool) ($_SESSION['logistics_authenticated'] ?? false);
@@ -69,8 +50,20 @@ function role_definitions(): array
 
 function demo_accounts(): array
 {
-    global $demoAccounts;
-    return $demoAccounts;
+    static $accounts = null;
+
+    if (is_array($accounts)) {
+        return $accounts;
+    }
+
+    try {
+        $repository = new \Models\UserRepository();
+        $accounts = array_intersect_key($repository->activeLoginAccounts(), role_definitions());
+    } catch (\Throwable) {
+        $accounts = [];
+    }
+
+    return $accounts;
 }
 
 function current_user_name(): string
@@ -102,6 +95,16 @@ spl_autoload_register(static function (string $class): void {
         require_once $path;
     }
 });
+
+if (isset($_GET['role'], $roleDefinitions[$_GET['role']]) && is_logged_in()) {
+    $_SESSION['logistics_role'] = $_GET['role'];
+    $account = demo_accounts()[$_GET['role']] ?? null;
+    if ($account !== null) {
+        $_SESSION['logistics_user_id'] = $account['id'];
+        $_SESSION['logistics_user_name'] = $account['name'];
+        $_SESSION['logistics_user_email'] = $account['email'];
+    }
+}
 
 function config(string $key, mixed $default = null): mixed
 {

@@ -27,13 +27,12 @@ class HomeController
         $role = (string) ($_POST['role'] ?? '');
         $email = trim((string) ($_POST['email'] ?? ''));
         $password = (string) ($_POST['password'] ?? '');
-        $accounts = \demo_accounts();
         $repository = new UserRepository();
         $user = $repository->findActiveByEmail($email);
 
         if (
             $user === null ||
-            !isset($accounts[$role]) ||
+            !isset(\role_definitions()[$role]) ||
             $user['role_key'] !== $role ||
             !password_verify($password, $user['password_hash'])
         ) {
