@@ -2,6 +2,8 @@
 
 $routes = [
     'home' => ['Controllers\\HomeController', 'index'],
+    'login' => ['Controllers\\HomeController', 'login'],
+    'logout' => ['Controllers\\HomeController', 'logout'],
     'dashboard' => ['Controllers\\DashboardController', 'index'],
     'vehicles' => ['Controllers\\LogisticsController', 'vehicles'],
     'trips' => ['Controllers\\LogisticsController', 'trips'],
@@ -28,7 +30,12 @@ if (!isset($routes[$route])) {
 
 [$controller, $action] = $routes[$route];
 
-if ($route !== 'home' && !role_can($route)) {
+if (!in_array($route, ['home', 'login', 'logout'], true) && !is_logged_in()) {
+    header('Location: ?route=home&login_required=1#login');
+    exit;
+}
+
+if (!in_array($route, ['home', 'login', 'logout'], true) && !role_can($route)) {
     header('Location: ?route=dashboard&denied=1');
     exit;
 }

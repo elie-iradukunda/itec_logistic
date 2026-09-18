@@ -39,6 +39,8 @@ mysql -u root -p < database/schema.sql
 mysql -u root -p logistics_mvc < database/seed.sql
 ```
 
+The seed file is idempotent, so you can run `database/seed.sql` again when you want to refresh the starter records without duplicating the seeded data.
+
 The local database was initialized with the XAMPP MariaDB service. The default local connection is `127.0.0.1`, database `logistics_mvc`, user `root`, and an empty password; change these through the `LOGISTICS_DB_*` environment variables when needed.
 
 The current UI keeps session-backed demo data available until database repositories are connected module by module. The PDO and schema foundations are ready for that transition and do not alter the existing Xode project.

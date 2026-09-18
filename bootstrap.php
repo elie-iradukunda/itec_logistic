@@ -19,8 +19,28 @@ $roleDefinitions = [
     'management' => ['label' => 'Management', 'routes' => ['dashboard', 'reports']],
 ];
 
-if (isset($_GET['role']) && isset($roleDefinitions[$_GET['role']])) {
+$demoAccounts = [
+    'super_admin' => ['name' => 'Admin User', 'email' => 'admin@itec.rw'],
+    'logistics_manager' => ['name' => 'Aline Mukamana', 'email' => 'aline@itec.rw'],
+    'fleet_manager' => ['name' => 'Eric Murenzi', 'email' => 'eric@itec.rw'],
+    'warehouse_manager' => ['name' => 'Nadine Tuyisenge', 'email' => 'nadine@itec.rw'],
+    'driver' => ['name' => 'Samuel Niyonzima', 'email' => 'samuel@itec.rw'],
+    'finance' => ['name' => 'Emmanuel Safari', 'email' => 'emmanuel@itec.rw'],
+    'management' => ['name' => 'Jean Pierre Habimana', 'email' => 'jeanpierre@itec.rw'],
+];
+
+if (isset($_GET['role'], $roleDefinitions[$_GET['role']]) && is_logged_in()) {
     $_SESSION['logistics_role'] = $_GET['role'];
+    $account = $demoAccounts[$_GET['role']] ?? null;
+    if ($account !== null) {
+        $_SESSION['logistics_user_name'] = $account['name'];
+        $_SESSION['logistics_user_email'] = $account['email'];
+    }
+}
+
+function is_logged_in(): bool
+{
+    return (bool) ($_SESSION['logistics_authenticated'] ?? false);
 }
 
 function current_role(): string
@@ -45,6 +65,26 @@ function role_definitions(): array
 {
     global $roleDefinitions;
     return $roleDefinitions;
+}
+
+function demo_accounts(): array
+{
+    global $demoAccounts;
+    return $demoAccounts;
+}
+
+function current_user_name(): string
+{
+    $accounts = demo_accounts();
+    $role = current_role();
+    return $_SESSION['logistics_user_name'] ?? ($accounts[$role]['name'] ?? role_label());
+}
+
+function current_user_email(): string
+{
+    $accounts = demo_accounts();
+    $role = current_role();
+    return $_SESSION['logistics_user_email'] ?? ($accounts[$role]['email'] ?? '');
 }
 
 if (PHP_SAPI === 'cli-server') {
