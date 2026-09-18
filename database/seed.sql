@@ -380,6 +380,23 @@ ON DUPLICATE KEY UPDATE
     format_label = VALUES(format_label),
     action_label = VALUES(action_label);
 
+INSERT INTO notifications (notification_key, user_id, role_key, title, message, link_route, severity, is_read, created_at) VALUES
+('NOTIF-SUPER-ADMIN-ACCESS', (SELECT id FROM users WHERE email = 'admin@itec.rw'), 'super_admin', 'User access review ready', 'All seeded roles are active. Review users and permissions before handing over the workspace.', 'users', 'info', 0, '2026-09-18 09:30:00'),
+('NOTIF-LOGISTICS-REQUESTS', (SELECT id FROM users WHERE email = 'aline@itec.rw'), 'logistics_manager', 'High priority transport requests', 'Two urgent or high priority transport requests need operations review today.', 'requests', 'warning', 0, '2026-09-18 09:35:00'),
+('NOTIF-FLEET-SERVICE', (SELECT id FROM users WHERE email = 'eric@itec.rw'), 'fleet_manager', 'Fleet service attention', 'Vehicles RAC 901P and RAB 407G need maintenance follow-up before dispatch.', 'maintenance', 'warning', 0, '2026-09-18 09:40:00'),
+('NOTIF-WAREHOUSE-REORDER', (SELECT id FROM users WHERE email = 'nadine@itec.rw'), 'warehouse_manager', 'Inventory reorder needed', 'Engine oil and air filters are below minimum stock level and need replenishment.', 'warehouse', 'warning', 0, '2026-09-18 09:45:00'),
+('NOTIF-DRIVER-TRIP', (SELECT id FROM users WHERE email = 'samuel@itec.rw'), 'driver', 'Assigned trip update', 'Trip TRP-0248 is in transit. Keep delivery status and proof records current.', 'trips', 'info', 0, '2026-09-18 09:50:00'),
+('NOTIF-FINANCE-APPROVALS', (SELECT id FROM users WHERE email = 'emmanuel@itec.rw'), 'finance', 'Expense approvals pending', 'Fuel, toll and allowance records are ready for finance review.', 'expenses', 'warning', 0, '2026-09-18 09:55:00'),
+('NOTIF-MANAGEMENT-REPORTS', (SELECT id FROM users WHERE email = 'jeanpierre@itec.rw'), 'management', 'Management reports updated', 'Vehicle utilization, delivery performance and expense summaries are ready.', 'reports', 'success', 0, '2026-09-18 10:00:00')
+ON DUPLICATE KEY UPDATE
+    user_id = VALUES(user_id),
+    role_key = VALUES(role_key),
+    title = VALUES(title),
+    message = VALUES(message),
+    link_route = VALUES(link_route),
+    severity = VALUES(severity),
+    is_read = VALUES(is_read);
+
 INSERT INTO audit_logs (user_id, action_name, entity_type, entity_id, reason, metadata)
 SELECT (SELECT id FROM users WHERE email = 'aline@itec.rw'), 'seed.created', 'database', 'seed-2026-09-18', 'Initial logistics seed data loaded.', '{"source":"database/seed.sql"}'
 WHERE NOT EXISTS (

@@ -20,6 +20,7 @@ $options = [
 
 $root = new PDO($rootDsn, $db['user'], $db['pass'], $options);
 $root->exec("DROP DATABASE IF EXISTS `{$dbName}`");
+$pdo = null;
 
 try {
     $schema = str_replace('logistics_mvc', $dbName, (string) file_get_contents(__DIR__ . '/../database/schema.sql'));
@@ -83,5 +84,6 @@ try {
 
     echo "Smoke tests passed.\n";
 } finally {
+    $pdo = null;
     $root->exec("DROP DATABASE IF EXISTS `{$dbName}`");
 }

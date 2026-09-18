@@ -1,4 +1,8 @@
-<?php $baseUrl = config('app.base_url', ''); ?>
+<?php
+$baseUrl = config('app.base_url', '');
+$notifications = current_notifications();
+$unreadNotifications = unread_notification_count();
+?>
 <!doctype html>
 <html lang="en">
 <head>
@@ -22,6 +26,7 @@
   <nav class="topnav navbar navbar-light">
     <button type="button" class="navbar-toggler text-muted mt-2 p-0 mr-3 collapseSidebar"><i class="fe fe-menu navbar-toggler-icon"></i></button>
     <ul class="nav ml-auto">
+      <li class="nav-item dropdown"><a class="nav-link logistics-top-control dropdown-toggle" href="#" data-toggle="dropdown" aria-label="Notifications"><i class="fe fe-bell fe-16 mr-1"></i><span>Updates</span><?php if ($unreadNotifications > 0): ?><strong class="badge badge-danger ml-1"><?= htmlspecialchars((string) $unreadNotifications) ?></strong><?php endif; ?></a><div class="dropdown-menu dropdown-menu-right" style="min-width:320px"><h6 class="dropdown-header">Operational updates</h6><?php if ($notifications === []): ?><span class="dropdown-item text-muted small">No updates for your workspace.</span><?php else: ?><?php foreach ($notifications as $notification): ?><?php $route = (string) ($notification['link_route'] ?? ''); $canOpen = $route !== '' && role_can($route); ?><a class="dropdown-item" href="<?= $canOpen ? $baseUrl . '/?route=' . urlencode($route) : '#' ?>"><div class="d-flex align-items-start"><span class="badge badge-<?= htmlspecialchars($notification['severity'] === 'danger' ? 'danger' : ($notification['severity'] === 'warning' ? 'warning' : ($notification['severity'] === 'success' ? 'success' : 'primary'))) ?> mr-2 mt-1">&nbsp;</span><span><strong class="d-block"><?= htmlspecialchars($notification['title']) ?></strong><small class="text-muted d-block"><?= htmlspecialchars($notification['message']) ?></small></span></div></a><?php endforeach; ?><?php endif; ?></div></li>
       <li class="nav-item dropdown"><a class="nav-link logistics-top-control dropdown-toggle" href="#" data-toggle="dropdown"><i class="fe fe-users fe-16 mr-1"></i><span>Role</span><strong><?= htmlspecialchars(role_label()) ?></strong></a><div class="dropdown-menu dropdown-menu-right"><h6 class="dropdown-header">Switch role for testing</h6><?php foreach (role_definitions() as $roleKey => $roleDefinition): ?><a class="dropdown-item <?= current_role() === $roleKey ? 'active' : '' ?>" href="<?= $baseUrl ?>/?route=dashboard&role=<?= urlencode($roleKey) ?>"><?= htmlspecialchars($roleDefinition['label']) ?></a><?php endforeach; ?></div></li>
       <li class="nav-item"><a class="nav-link logistics-top-control logistics-theme-icon" href="#" id="modeSwitcher" data-mode="dark" aria-label="Switch light or dark theme" title="Switch theme"><i class="fe fe-sun fe-16"></i></a></li>
       <li class="nav-item dropdown"><a class="nav-link dropdown-toggle text-muted pr-0" href="#" data-toggle="dropdown"><span class="avatar avatar-sm mt-2"><img src="<?= $baseUrl ?>/assets/avatars/face-1.jpg" alt="User" class="avatar-img rounded-circle"></span></a><div class="dropdown-menu dropdown-menu-right"><h6 class="dropdown-header"><?= htmlspecialchars(current_user_name()) ?><small class="d-block text-muted"><?= htmlspecialchars(current_user_email()) ?></small></h6><a class="dropdown-item" href="#"><i class="fe fe-user fe-16 mr-2"></i> Profile</a><a class="dropdown-item" href="#"><i class="fe fe-settings fe-16 mr-2"></i> Settings</a><a class="dropdown-item" href="<?= $baseUrl ?>/?route=logout"><i class="fe fe-power fe-16 mr-2"></i> Logout</a></div></li>

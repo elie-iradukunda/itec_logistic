@@ -38,6 +38,7 @@ The goal is to make logistics activity visible, controlled, and accountable from
 - Delete confirmation with a required reason.
 - Server-side validation for required fields, option values, dates, numbers, and upload types.
 - File upload handling for delivery proof files, signatures, and fuel receipts.
+- DB-backed operational notifications for role/user updates.
 - Persistent audit logs for login, failed login, logout, create, update, delete, status change, and report export actions.
 - CSV export for reports.
 - Light/dark theme switcher from the dashboard layout.
@@ -165,13 +166,14 @@ The schema creates these tables:
 - suppliers
 - purchase_requests
 - reports
+- notifications
 - audit_logs
 
 The seed file includes realistic starter data for all main tables and is idempotent. You can run it again without duplicating the seeded records.
 
 ## Current Data Implementation
 
-Module records are read from and written to MySQL through `app/Models/LogisticsData.php`. Login uses `app/Models/UserRepository.php` and verifies `users.password_hash`. Audit actions are stored in `audit_logs` through `app/Models/AuditLog.php`. Uploaded delivery and fuel files are saved under `storage/uploads/`.
+Module records are read from and written to MySQL through `app/Models/LogisticsData.php`. Login uses `app/Models/UserRepository.php` and verifies `users.password_hash`. Role/user updates are loaded from `notifications` through `app/Models/Notification.php`. Audit actions are stored in `audit_logs` through `app/Models/AuditLog.php`. Uploaded delivery and fuel files are saved under `storage/uploads/`.
 
 ## Tech Stack
 
@@ -198,6 +200,8 @@ Module records are read from and written to MySQL through `app/Models/LogisticsD
 - `database/migrations/` - incremental schema updates for existing databases
 - `scripts/migrate.php` - migration runner
 - `tests/smoke.php` - automated smoke test
+- `tests/migrate_fresh.php` - verifies one-command setup on a brand-new database
+- `tests/seed_integrity.php` - full seed, role, notification, and workflow integrity test
 - `storage/uploads/` - runtime upload location for proofs, signatures, and receipts
 - `public/assets/` - CSS, JavaScript, images, fonts, and UI assets
 
@@ -236,7 +240,15 @@ Default local database settings:
 - User: `root`
 - Password: empty
 
-Initialize the database:
+Initialize or update the database with one command:
+
+```text
+C:\xampp\php\php.exe scripts\migrate.php
+```
+
+The migration script creates the database if it does not exist, imports `database/schema.sql` when the database is empty, applies every file in `database/migrations/`, and loads `database/seed.sql`. The seed is idempotent, so running the command again refreshes the starter data without duplicating seeded records.
+
+Manual setup is still possible:
 
 ```text
 C:\xampp\mysql\bin\mysql.exe -u root < database/schema.sql
@@ -248,13 +260,6 @@ If your MySQL user has a password, add `-p`:
 ```text
 C:\xampp\mysql\bin\mysql.exe -u root -p < database/schema.sql
 C:\xampp\mysql\bin\mysql.exe -u root -p logistics_mvc < database/seed.sql
-```
-
-For an existing database that already has the older schema, run the migration script first, then re-run the seed file:
-
-```text
-C:\xampp\php\php.exe scripts\migrate.php
-C:\xampp\mysql\bin\mysql.exe -u root logistics_mvc < database/seed.sql
 ```
 
 Environment variables can override database settings:
@@ -275,6 +280,20 @@ C:\xampp\php\php.exe tests\smoke.php
 ```
 
 The test creates a temporary database, imports the schema and seed data, verifies the seeded login password, checks role module access, performs a vehicle create/status workflow, confirms report data, writes an audit log, and drops the temporary database when finished.
+
+Run the fresh migration test to prove a new machine can set up everything with only `scripts/migrate.php`:
+
+```text
+C:\xampp\php\php.exe tests\migrate_fresh.php
+```
+
+Run the full seed integrity test when you want to verify every seeded workflow:
+
+```text
+C:\xampp\php\php.exe tests\seed_integrity.php
+```
+
+That test imports the schema, runs the seed twice to prove idempotency, verifies expected counts for every seeded table, checks every seeded user/password/role permission, confirms every role receives notifications, loads each allowed module, creates a request-to-trip-to-delivery expense workflow, and confirms audit updates are written.
 
 ## Main Routes
 
@@ -304,6 +323,7 @@ These items are implemented in the current codebase:
 - Schema changes are captured in `database/migrations/`.
 - Module forms have server-side validation.
 - Delivery and fuel upload fields are handled by the application.
+- Notifications are seeded and loaded from the database for every role.
 - Audit logs are persisted for authentication, module changes, status changes, deletion, and report export.
 - Automated smoke tests cover login data, role access, CRUD persistence, reports, and audit logging.
 

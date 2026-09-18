@@ -85,6 +85,32 @@ function current_user_id(): ?int
     return isset($_SESSION['logistics_user_id']) ? (int) $_SESSION['logistics_user_id'] : null;
 }
 
+function current_notifications(int $limit = 6): array
+{
+    if (!is_logged_in()) {
+        return [];
+    }
+
+    try {
+        return (new \Models\Notification())->forCurrentUser(current_user_id(), current_role(), $limit);
+    } catch (\Throwable) {
+        return [];
+    }
+}
+
+function unread_notification_count(): int
+{
+    if (!is_logged_in()) {
+        return 0;
+    }
+
+    try {
+        return (new \Models\Notification())->unreadCount(current_user_id(), current_role());
+    } catch (\Throwable) {
+        return 0;
+    }
+}
+
 if (PHP_SAPI === 'cli-server') {
     $config['app']['base_url'] = '';
 }
