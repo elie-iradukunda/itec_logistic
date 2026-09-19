@@ -17,6 +17,7 @@ class ApiController
             'email' => \current_user_email(),
             'role' => \current_role(),
             'role_label' => \role_label(),
+            'can_switch_role' => \can_switch_role(),
         ]);
     }
 
