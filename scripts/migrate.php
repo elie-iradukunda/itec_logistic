@@ -112,4 +112,14 @@ try {
     exit(1);
 }
 
+if (in_array('--demo', $argv ?? [], true)) {
+    try {
+        $root->exec($prepareSql(__DIR__ . '/../database/seed_demo.sql', $db['name']));
+        echo "Loaded database/seed_demo.sql\n";
+    } catch (Throwable $exception) {
+        fwrite(STDERR, "Failed demo seed: {$exception->getMessage()}\n");
+        exit(1);
+    }
+}
+
 echo "Database setup complete.\n";
