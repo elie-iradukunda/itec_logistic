@@ -15,6 +15,7 @@ CREATE TABLE vehicles (
 
 CREATE TABLE drivers (
     id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    user_id INT UNSIGNED NULL UNIQUE,
     full_name VARCHAR(150) NOT NULL,
     phone VARCHAR(40) NULL,
     license_number VARCHAR(80) NOT NULL UNIQUE,
