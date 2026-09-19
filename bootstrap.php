@@ -79,6 +79,17 @@ function current_user_email(): string
     return $_SESSION['logistics_user_email'] ?? ($accounts[$role]['email'] ?? '');
 }
 
+/** users.prvg: 1 = privileged (may switch into any role), 2 = standard (default). Stored at login and kept while switching roles. */
+function current_prvg(): int
+{
+    return (int) ($_SESSION['logistics_prvg'] ?? 2) === 1 ? 1 : 2;
+}
+
+function can_switch_role(): bool
+{
+    return is_logged_in() && current_prvg() === 1;
+}
+
 function current_user_id(): ?int
 {
     return isset($_SESSION['logistics_user_id']) ? (int) $_SESSION['logistics_user_id'] : null;
@@ -121,7 +132,7 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
-if (isset($_GET['role'], $roleDefinitions[$_GET['role']]) && is_logged_in()) {
+if (isset($_GET['role'], $roleDefinitions[$_GET['role']]) && can_switch_role()) {
     $_SESSION['logistics_role'] = $_GET['role'];
     $account = demo_accounts()[$_GET['role']] ?? null;
     if ($account !== null) {
@@ -168,6 +179,37 @@ function time_ago(?string $datetime): string
         $seconds < 604800 => intdiv($seconds, 86400) . ' d ago',
         default => date('d M Y', $time),
     };
+}
+
+/** First URL segment of the current request without the app base path, e.g. "vehicles" for /itec_logistic/vehicles/create. */
+function current_route(): string
+{
+    $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
+    $base = rtrim((string) config('app.base_url', ''), '/');
+    if ($base !== '' && strncasecmp($path, $base, strlen($base)) === 0) {
+        $path = substr($path, strlen($base));
+    }
+
+    return explode('/', trim($path, '/'))[0] ?? '';
+}
+
+/** " active" when the sidebar link points at the page being viewed (reports links also match their report_type filter). */
+function nav_active(string $route, ?string $reportType = null): string
+{
+    if (current_route() !== $route) {
+        return '';
+    }
+    if ($route === 'reports' && $reportType !== null && (string) ($_GET['report_type'] ?? '') !== $reportType) {
+        return '';
+    }
+
+    return ' active';
+}
+
+/** True when the current page is one of the routes inside a sidebar group. */
+function nav_group(array $routes): bool
+{
+    return in_array(current_route(), $routes, true);
 }
 
 function view(string $template, array $data = []): void
