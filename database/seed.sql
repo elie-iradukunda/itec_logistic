@@ -116,10 +116,11 @@ INSERT INTO suppliers (supplier_name, contact_name, phone, email, status)
 SELECT 'Fleet Workshop', 'Operations desk', '+250 788 404 040', 'workshop@itec.rw', 'active'
 WHERE NOT EXISTS (SELECT 1 FROM suppliers WHERE supplier_name = 'Fleet Workshop');
 
-INSERT INTO users (role_id, full_name, email, password_hash, phone, department, status, last_login_at)
-SELECT id, 'Admin User', 'admin@itec.rw', '$2y$10$xT3CpwhBWfjZdDjM1qVKleYlvscj7OR0UTKfa2gCdgF4EqHt67ea6', '+250 788 000 001', 'Administration', 'active', '2026-09-18 09:00:00'
+INSERT INTO users (role_id, full_name, email, password_hash, phone, department, status, prvg, last_login_at)
+SELECT id, 'Admin User', 'admin@itec.rw', '$2y$10$xT3CpwhBWfjZdDjM1qVKleYlvscj7OR0UTKfa2gCdgF4EqHt67ea6', '+250 788 000 001', 'Administration', 'active', 1, '2026-09-18 09:00:00'
 FROM roles WHERE role_key = 'super_admin'
 ON DUPLICATE KEY UPDATE
+    prvg = VALUES(prvg),
     role_id = VALUES(role_id),
     full_name = VALUES(full_name),
     password_hash = VALUES(password_hash),
