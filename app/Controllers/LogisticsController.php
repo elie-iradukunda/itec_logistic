@@ -7,40 +7,27 @@ use Models\AuditLog;
 
 class LogisticsController
 {
-    public function vehicles(): void { $this->render('vehicles'); }
-    public function trips(): void { $this->render('trips'); }
-    public function drivers(): void { $this->render('drivers'); }
-    public function maintenance(): void { $this->render('maintenance'); }
-    public function requests(): void { $this->render('requests'); }
-    public function fuel(): void { $this->render('fuel'); }
-    public function expenses(): void { $this->render('expenses'); }
-    public function warehouse(): void { $this->render('warehouse'); }
-    public function reports(): void { $this->render('reports'); }
-    public function deliveries(): void { $this->render('deliveries'); }
-    public function procurement(): void { $this->render('procurement'); }
-    public function users(): void { $this->render('users'); }
+    public function index(array $params): void { $this->render($params['module'], 'index'); }
+    public function create(array $params): void { $this->render($params['module'], 'create'); }
+    public function details(array $params): void { $this->render($params['module'], 'details', $params['id']); }
+    public function edit(array $params): void { $this->render($params['module'], 'edit', $params['id']); }
+    public function toggle(array $params): void { $this->render($params['module'], 'toggle', $params['id']); }
+    public function delete(array $params): void { $this->render($params['module'], 'delete', $params['id']); }
+    public function export(array $params): void { $this->exportReport($params['id'] ?? null); }
 
-    private function render(string $key): void
+    private function render(string $key, string $action, ?string $id = null): void
     {
-        $action = $_GET['action'] ?? 'index';
-        $id = isset($_GET['id']) ? (string) $_GET['id'] : null;
-
-        if ($key === 'reports' && $action === 'export') {
-            $this->exportReport($id);
-            return;
-        }
-
         if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($action === 'delete' && $id !== null) {
                 $reason = trim((string) ($_POST['reason'] ?? ''));
                 if ($reason === '') {
-                    header('Location: ?route=' . urlencode($key) . '&error=delete_reason');
+                    header('Location: ' . \url($key, ['error' => 'delete_reason']));
                     exit;
                 }
                 try {
                     LogisticsData::delete($key, $id, $reason);
                 } catch (\Throwable) {
-                    header('Location: ?route=' . urlencode($key) . '&error=delete_failed');
+                    header('Location: ' . \url($key, ['error' => 'delete_failed']));
                     exit;
                 }
             } elseif ($action === 'toggle' && $id !== null) {
@@ -86,7 +73,7 @@ class LogisticsController
                     return;
                 }
             }
-            header('Location: ?route=' . urlencode($key) . '&saved=1');
+            header('Location: ' . \url($key, ['saved' => 1]));
             exit;
         }
 
