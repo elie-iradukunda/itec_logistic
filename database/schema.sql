@@ -69,8 +69,10 @@ CREATE TABLE users (
     phone VARCHAR(40) NULL,
     department VARCHAR(80) NULL,
     status ENUM('active','inactive','locked') NOT NULL DEFAULT 'active',
+    prvg TINYINT UNSIGNED NOT NULL DEFAULT 2,
     last_login_at DATETIME NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT chk_users_prvg CHECK (prvg IN (1, 2)),
     FOREIGN KEY (role_id) REFERENCES roles(id)
 );
 
