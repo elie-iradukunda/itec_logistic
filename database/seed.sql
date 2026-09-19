@@ -406,4 +406,10 @@ WHERE NOT EXISTS (
       AND entity_id = 'seed-2026-09-18'
 );
 
+-- Link the driver profile to the driver login so the driver dashboard can show personal data.
+UPDATE drivers
+SET user_id = (SELECT id FROM users WHERE email = 'samuel@itec.rw')
+WHERE license_number = 'RWA-DL-0912'
+  AND user_id IS NULL;
+
 COMMIT;
