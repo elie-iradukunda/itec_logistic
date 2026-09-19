@@ -43,7 +43,7 @@
   --breakpoint-md: 768px;
   --breakpoint-lg: 992px;
   --breakpoint-xl: 1200px;
-  --font-family-sans-serif: "Overpass", sans-serif;
+  --font-family-sans-serif: "Plus Jakarta Sans", sans-serif;
   --font-family-monospace: SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
 
 *,
@@ -62,7 +62,7 @@ article, aside, figcaption, figure, footer, header, hgroup, main, nav, section {
 
 body {
   margin: 0;
-  font-family: "Overpass", sans-serif;
+  font-family: "Plus Jakarta Sans", sans-serif;
   font-size: 0.875rem;
   font-weight: 400;
   line-height: 1.5;
@@ -4262,7 +4262,7 @@ a.close.disabled {
   z-index: 1070;
   display: block;
   margin: 0;
-  font-family: "Overpass", sans-serif;
+  font-family: "Plus Jakarta Sans", sans-serif;
   font-style: normal;
   font-weight: 400;
   line-height: 1.5;
@@ -4347,7 +4347,7 @@ a.close.disabled {
   z-index: 1060;
   display: block;
   max-width: 276px;
-  font-family: "Overpass", sans-serif;
+  font-family: "Plus Jakarta Sans", sans-serif;
   font-style: normal;
   font-weight: 400;
   line-height: 1.5;
@@ -7831,7 +7831,7 @@ select {
   stroke-width: 8;
   font-weight: 400;
   font-size: 1.2rem;
-  font-family: "Overpass", sans-serif; }
+  font-family: "Plus Jakarta Sans", sans-serif; }
 
 .gauge-container.g3 > .gauge .dial {
   stroke: transparent;
@@ -9202,7 +9202,7 @@ form.was-validated select:valid ~ .select2-container--bootstrap4 .select2-select
 
 .uppy-Root {
   box-sizing: border-box;
-  font-family: "Overpass", sans-serif;
+  font-family: "Plus Jakarta Sans", sans-serif;
   line-height: 1;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -10630,7 +10630,7 @@ form.was-validated select:valid ~ .select2-container--bootstrap4 .select2-select
   height: 30px;
   background-color: transparent;
   outline: 0;
-  font-family: "Overpass", sans-serif;
+  font-family: "Plus Jakarta Sans", sans-serif;
   font-size: 12px;
   line-height: 1.4;
   border: 0;
