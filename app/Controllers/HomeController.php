@@ -49,6 +49,7 @@ class HomeController
         $_SESSION['logistics_user_id'] = (int) $user['id'];
         $_SESSION['logistics_user_name'] = $user['full_name'];
         $_SESSION['logistics_user_email'] = $user['email'];
+        $_SESSION['logistics_prvg'] = (int) $user['prvg'] === 1 ? 1 : 2;
 
         AuditLog::record('auth.login', 'user', (string) $user['id']);
 
@@ -65,7 +66,8 @@ class HomeController
             $_SESSION['logistics_role'],
             $_SESSION['logistics_user_id'],
             $_SESSION['logistics_user_name'],
-            $_SESSION['logistics_user_email']
+            $_SESSION['logistics_user_email'],
+            $_SESSION['logistics_prvg']
         );
 
         $this->redirectHome('logged_out=1');
