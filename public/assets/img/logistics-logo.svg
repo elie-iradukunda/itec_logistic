@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 112" role="img" aria-labelledby="title desc">
-  <title id="title">ITEC Logistics</title>
-  <desc id="desc">A teal logistics route mark with an orange destination arrow and ITEC Logistics wordmark.</desc>
+  <title id="title">LMS - Logistics Management System</title>
+  <desc id="desc">A teal logistics route mark with an orange destination arrow and LMS wordmark.</desc>
   <rect width="360" height="112" rx="18" fill="#ffffff"/>
   <rect x="14" y="14" width="84" height="84" rx="18" fill="#174b49"/>
   <path d="M34 72c10-23 21-35 36-35 9 0 14 4 19 10" fill="none" stroke="#83d4b2" stroke-width="7" stroke-linecap="round"/>
@@ -8,6 +8,6 @@
   <circle cx="35" cy="72" r="7" fill="#e4ad4e"/>
   <path d="M40 45h22v17H40z" fill="none" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
   <path d="m40 45 11 8 11-8" fill="none" stroke="#ffffff" stroke-width="4" stroke-linejoin="round"/>
-  <text x="122" y="51" fill="#174b49" font-family="Arial, sans-serif" font-size="25" font-weight="700" letter-spacing="3">ITEC</text>
-  <text x="122" y="79" fill="#718083" font-family="Arial, sans-serif" font-size="19" font-weight="600" letter-spacing="2">LOGISTICS</text>
+  <text x="122" y="51" fill="#174b49" font-family="Arial, sans-serif" font-size="32" font-weight="700" letter-spacing="4">LMS</text>
+  <text x="122" y="79" fill="#718083" font-family="Arial, sans-serif" font-size="12" font-weight="600" letter-spacing="1">LOGISTICS MANAGEMENT SYSTEM</text>
 </svg>
