@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 return [
     'app' => [
-        'name' => 'ITEC Logistics',
-        'base_url' => '/logistics-mvc/public',
+        'name' => 'LMS',
+        'base_url' => '/itec_logistic',
     ],
     'db' => [
         'host' => getenv('LOGISTICS_DB_HOST') ?: '127.0.0.1',
