@@ -55,7 +55,7 @@ try {
     $assert((int) $counts['users_count'] === 7, 'fresh migration creates seven users');
     $assert((int) $counts['notifications_count'] === 7, 'fresh migration creates seven notifications');
     $assert((int) $counts['reports_count'] === 9, 'fresh migration creates reports');
-    $assert((int) $counts['migrations_count'] === 2, 'fresh migration records migrations');
+    $assert((int) $counts['migrations_count'] === count(glob(__DIR__ . '/../database/migrations/*.sql')), 'fresh migration records migrations');
 
     if ($failures !== []) {
         foreach ($failures as $failure) {
