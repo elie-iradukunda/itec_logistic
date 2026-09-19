@@ -52,7 +52,7 @@ class HomeController
 
         AuditLog::record('auth.login', 'user', (string) $user['id']);
 
-        header('Location: ' . $this->url('dashboard'));
+        header('Location: ' . \url('dashboard'));
         exit;
     }
 
@@ -73,13 +73,7 @@ class HomeController
 
     private function redirectHome(string $query = ''): void
     {
-        header('Location: ' . $this->url('home') . ($query === '' ? '' : '&' . $query));
+        header('Location: ' . \url('') . ($query === '' ? '' : '?' . $query));
         exit;
-    }
-
-    private function url(string $route): string
-    {
-        $baseUrl = \config('app.base_url', '');
-        return $baseUrl . '/?route=' . urlencode($route);
     }
 }
