@@ -1,6 +1,6 @@
-# ITEC Logistics MVC
+# LMS - Logistics Management System
 
-ITEC Logistics MVC is a PHP-based logistics management system for planning, monitoring, and controlling transport operations. It gives an organization one workspace for vehicles, drivers, trips, delivery tracking, maintenance, fuel, inventory, procurement, expenses, reports, and role-based access.
+LMS is a PHP-based logistics management system for planning, monitoring, and controlling transport operations. It gives an organization one workspace for vehicles, drivers, trips, delivery tracking, maintenance, fuel, inventory, procurement, expenses, reports, and role-based access.
 
 The project is built as a separate lightweight MVC application and does not modify the existing Xode application.
 
@@ -189,7 +189,9 @@ Module records are read from and written to MySQL through `app/Models/LogisticsD
 ## Project Structure
 
 - `public/index.php` - front controller
-- `routes/web.php` - application route table
+- `routers/web.php` - web (HTML) route table
+- `routers/api.php` - JSON API route table, reached as `/api/<endpoint>`
+- `app/Core/Router.php` - route registration, login/role checks and dispatch
 - `bootstrap.php` - configuration, session, role helpers, and autoloading
 - `app/Controllers/` - controller classes
 - `app/Models/` - data and database model classes
@@ -210,25 +212,25 @@ Module records are read from and written to MySQL through `app/Models/LogisticsD
 Through XAMPP, open:
 
 ```text
-http://localhost/logistics-mvc/public/
+http://localhost/itec_logistic/
 ```
 
 Or run PHP's built-in server from the project root:
 
 ```text
-php -S localhost:8080 -t public
+php -S localhost:8080 -t public public/index.php
 ```
 
 On this XAMPP installation, use the XAMPP PHP executable if the global `php` command points somewhere else:
 
 ```text
-C:\xampp\php\php.exe -S localhost:8091 -t public
+C:\xampp\php\php.exe -S localhost:8091 -t public public/index.php
 ```
 
 Then open:
 
 ```text
-http://127.0.0.1:8091/?route=home
+http://127.0.0.1:8091/
 ```
 
 ## Database Setup
@@ -297,22 +299,33 @@ That test imports the schema, runs the seed twice to prove idempotency, verifies
 
 ## Main Routes
 
-- `?route=home` - public home and login page
-- `?route=login` - login POST endpoint
-- `?route=logout` - logout endpoint
-- `?route=dashboard` - role-specific dashboard
-- `?route=vehicles` - vehicle fleet module
-- `?route=drivers` - driver module
-- `?route=requests` - transport requests module
-- `?route=trips` - trips module
-- `?route=deliveries` - deliveries module
-- `?route=maintenance` - maintenance module
-- `?route=fuel` - fuel module
-- `?route=expenses` - expenses module
-- `?route=warehouse` - warehouse and inventory module
-- `?route=procurement` - procurement module
-- `?route=reports` - reports module
-- `?route=users` - users and permissions module
+- `/` - public home and login page
+- `/login` - login POST endpoint
+- `/logout` - logout endpoint
+- `/dashboard` - role-specific dashboard
+- `/vehicles` - vehicle fleet module
+- `/drivers` - driver module
+- `/requests` - transport requests module
+- `/trips` - trips module
+- `/deliveries` - deliveries module
+- `/maintenance` - maintenance module
+- `/fuel` - fuel module
+- `/expenses` - expenses module
+- `/warehouse` - warehouse and inventory module
+- `/procurement` - procurement module
+- `/reports` - reports module (`/reports?report_type=Fuel%20consumption` filters, `/reports/export` downloads CSV)
+- `/users` - users and permissions module
+- `/api/health`, `/api/me` - JSON endpoints
+
+Every module also has these sub-routes, where `{id}` is the record's first-column value (plate number, reference code, name):
+
+- `/{module}/create` - create form (GET) and save (POST)
+- `/{module}/{id}` - record details
+- `/{module}/{id}/edit` - edit form (GET) and save (POST)
+- `/{module}/{id}/toggle` - change status (POST)
+- `/{module}/{id}/delete` - delete with reason (POST)
+
+Under Apache the root `.htaccess` forwards every request to `public/`, so `mod_rewrite` and `AllowOverride All` are required. The base path comes from `app.base_url` in `config/config.php` (`/itec_logistic`); PHP's built-in server ignores it.
 
 ## Completed Improvement Checklist
 
