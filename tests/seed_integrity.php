@@ -68,6 +68,10 @@ try {
     $accounts = $repository->activeLoginAccounts();
     $assert(count($accounts) === 7, 'all seven seeded login accounts are active database users');
 
+    $privileges = $pdo->query('SELECT email, prvg FROM users')->fetchAll(PDO::FETCH_KEY_PAIR);
+    $assert((int) ($privileges['admin@itec.rw'] ?? 0) === 1, 'the seeded admin has privilege 1 (may switch roles)');
+    $assert(count(array_filter($privileges, static fn ($prvg): bool => (int) $prvg !== 2)) === 1, 'every other seeded user keeps the default privilege 2');
+
     $allRoutes = ['dashboard', 'vehicles', 'trips', 'deliveries', 'requests', 'drivers', 'maintenance', 'fuel', 'expenses', 'warehouse', 'procurement', 'reports', 'users'];
     $moduleRoutes = ['vehicles', 'trips', 'deliveries', 'requests', 'drivers', 'maintenance', 'fuel', 'expenses', 'warehouse', 'procurement', 'reports', 'users'];
 
