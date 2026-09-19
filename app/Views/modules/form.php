@@ -1,4 +1,4 @@
-<div class="row align-items-center mb-3"><div class="col"><p class="small text-muted text-uppercase mb-1"><?= htmlspecialchars($module['kicker']) ?></p><h2 class="h5 page-title"><?= htmlspecialchars($formTitle) ?></h2><p class="text-muted small">Use existing operational records where possible to keep logistics data connected.</p></div><div class="col-auto"><a class="btn btn-outline-primary" href="<?= $baseUrl ?>/?route=<?= urlencode($moduleKey) ?>">Cancel</a></div></div>
+<div class="row align-items-center mb-3"><div class="col"><p class="small text-muted text-uppercase mb-1"><?= htmlspecialchars($module['kicker']) ?></p><h2 class="h5 page-title"><?= htmlspecialchars($formTitle) ?></h2><p class="text-muted small">Use existing operational records where possible to keep logistics data connected.</p></div><div class="col-auto"><a class="btn btn-outline-primary" href="<?= url($moduleKey) ?>">Cancel</a></div></div>
 <div class="card shadow"><div class="card-body"><form method="post" action="<?= htmlspecialchars($formAction) ?>" enctype="multipart/form-data"><div class="row">
 <?php foreach ($module['columns'] as $index => $column): ?>
   <?php
