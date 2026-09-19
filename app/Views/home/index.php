@@ -13,23 +13,26 @@ $selectedEmail = $selectedRole !== '' ? ($accounts[$selectedRole]['email'] ?? ''
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ITEC Logistics | Logistics made visible</title>
+  <title>LMS | Logistics made visible</title>
   <link rel="icon" href="<?= $baseUrl ?>/assets/img/logistics-logo.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/feather.css">
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/app-light.css">
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics.css">
 </head>
 <body class="logistics-home">
   <header class="home-nav">
-    <a class="home-brand" href="<?= $baseUrl ?>/?route=home" aria-label="ITEC Logistics home">
-      <img src="<?= $baseUrl ?>/assets/img/logistics-logo.svg" alt="ITEC Logistics" width="150">
+    <a class="home-brand" href="<?= url('') ?>" aria-label="LMS home">
+      <img src="<?= $baseUrl ?>/assets/img/logistics-logo.svg" alt="LMS" width="150">
     </a>
     <nav aria-label="Home navigation">
       <a href="#capabilities">Capabilities</a>
       <a href="#workflow">Workflow</a>
       <a href="#login">Login</a>
       <?php if (is_logged_in()): ?>
-        <a class="button button-primary" href="<?= $baseUrl ?>/?route=dashboard"><i class="fe fe-grid"></i> Workspace</a>
+        <a class="button button-primary" href="<?= url('dashboard') ?>"><i class="fe fe-grid"></i> Workspace</a>
       <?php endif; ?>
     </nav>
   </header>
@@ -37,7 +40,7 @@ $selectedEmail = $selectedRole !== '' ? ($accounts[$selectedRole]['email'] ?? ''
   <main>
     <section class="home-hero">
       <div class="hero-copy">
-        <p class="home-kicker">ITEC logistics operations platform</p>
+        <p class="home-kicker">LMS logistics management system</p>
         <h1>Every vehicle.<br><em>Every delivery.</em><br>One clear view.</h1>
         <p>Plan transport, protect fleet uptime, control inventory and turn every movement into an accountable operation.</p>
         <div class="hero-actions">
@@ -72,7 +75,7 @@ $selectedEmail = $selectedRole !== '' ? ($accounts[$selectedRole]['email'] ?? ''
           <div class="home-alert home-alert-danger">No active database users were found. Run the schema and seed files, then refresh this page.</div>
         <?php endif; ?>
 
-        <form class="home-login-form" method="post" action="<?= $baseUrl ?>/?route=login">
+        <form class="home-login-form" method="post" action="<?= url('login') ?>">
           <label for="loginRole">Role</label>
           <select id="loginRole" name="role" required <?= $accountRoles === [] ? 'disabled' : '' ?>>
             <?php foreach ($accountRoles as $roleKey => $definition): ?>
@@ -97,7 +100,7 @@ $selectedEmail = $selectedRole !== '' ? ($accounts[$selectedRole]['email'] ?? ''
             <?php foreach ($accounts as $roleKey => $account): ?>
               <?php if (!isset($roleDefinitions[$roleKey])) { continue; } ?>
               <li>
-                <a href="<?= $baseUrl ?>/?route=home&role=<?= urlencode($roleKey) ?>#login">
+                <a href="<?= url('', ['role' => $roleKey]) ?>#login">
                   <?= htmlspecialchars($roleDefinitions[$roleKey]['label']) ?>
                 </a>
                 <small><?= htmlspecialchars($account['email']) ?></small>
@@ -130,6 +133,7 @@ $selectedEmail = $selectedRole !== '' ? ($accounts[$selectedRole]['email'] ?? ''
       </div>
     </section>
   </main>
+  <footer class="lms-footer">Powered by ITEC LTD &copy; <?= date('Y') ?></footer>
   <script>
     var roleSelect = document.getElementById('loginRole');
     var emailInput = document.getElementById('loginEmail');
