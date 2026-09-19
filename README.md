@@ -30,7 +30,9 @@ The goal is to make logistics activity visible, controlled, and accountable from
 - Password verification against the seeded `users` table.
 - Session-based authentication and logout after database login.
 - Role-based access control for dashboards and modules.
-- Role-specific dashboards with operational metrics.
+- User privilege (`users.prvg`): `1` may switch into any role from the top bar, `2` (the default) cannot. Only the seeded admin has `1`; it can be changed on the Users page by a privileged user.
+- Role-specific dashboards whose KPI cards, charts, attention items and recent trips all come from the database.
+- Role-based charts (ApexCharts) with a "View as table" twin for every chart; light and dark theme aware.
 - Sidebar navigation that changes based on the logged-in role.
 - Database-backed CRUD-style screens for logistics records.
 - Searchable and filterable module tables.
@@ -85,7 +87,17 @@ Seeded active users:
 
 ### Dashboard
 
-Shows role-specific metrics, recent trips and deliveries, and operational attention items such as vehicles due for service, licenses expiring soon, and fuel review reminders.
+Shows role-specific KPI cards, charts, recent trips and operational attention items. Everything is computed by `app/Models/ChartData.php` and drawn by `public/assets/js/lms-charts.js`.
+
+| Role | Charts |
+| --- | --- |
+| Super Admin | Fleet status, monthly expenses, trips by status, system activity |
+| Logistics Manager | Trips per week, delivery completion, request pipeline, deliveries by status |
+| Fleet Manager | Fleet status, fuel purchased, fuel by vehicle, maintenance cost, driver licence expiry |
+| Warehouse Manager | Stock against minimum level, stock status, stock value by warehouse, purchase requests |
+| Finance | Expenses by category, monthly spend, expense approvals, fuel cost by vehicle, procurement by supplier |
+| Management | Fleet utilization, trips per month, logistics cost, cost per trip |
+| Driver | My trips, my trips per week, my deliveries, licence validity (needs the login linked to a driver profile through `drivers.user_id`) |
 
 ### Vehicles
 
@@ -200,7 +212,10 @@ Module records are read from and written to MySQL through `app/Models/LogisticsD
 - `database/schema.sql` - database schema
 - `database/seed.sql` - starter data
 - `database/migrations/` - incremental schema updates for existing databases
-- `scripts/migrate.php` - migration runner
+- `scripts/migrate.php` - migration runner (`--demo` also loads `database/seed_demo.sql`)
+- `database/seed_demo.sql` - optional demo history (months of trips, expenses, fuel, maintenance) so dashboard trends have data
+- `app/Models/ChartData.php` - dashboard KPI, chart and attention queries
+- `public/assets/js/lms-charts.js` - dashboard chart rendering
 - `tests/smoke.php` - automated smoke test
 - `tests/migrate_fresh.php` - verifies one-command setup on a brand-new database
 - `tests/seed_integrity.php` - full seed, role, notification, and workflow integrity test
@@ -249,6 +264,12 @@ C:\xampp\php\php.exe scripts\migrate.php
 ```
 
 The migration script creates the database if it does not exist, imports `database/schema.sql` when the database is empty, applies every file in `database/migrations/`, and loads `database/seed.sql`. The seed is idempotent, so running the command again refreshes the starter data without duplicating seeded records.
+
+To load months of demo history so the trend charts have something to show (safe to repeat):
+
+```text
+C:\xampp\php\php.exe scripts\migrate.php --demo
+```
 
 Manual setup is still possible:
 
