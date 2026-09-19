@@ -3,7 +3,6 @@
 declare(strict_types=1);
 
 $config = require __DIR__ . '/config/config.php';
-$route = trim((string) ($_GET['route'] ?? 'dashboard'), '/');
 
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
@@ -143,6 +142,32 @@ function config(string $key, mixed $default = null): mixed
         $value = $value[$segment];
     }
     return $value;
+}
+
+function url(string|array $path = '', array $query = []): string
+{
+    $segments = array_map('rawurlencode', array_map('strval', (array) $path));
+    $url = rtrim((string) config('app.base_url', ''), '/') . '/' . implode('/', $segments);
+
+    return $query === [] ? $url : $url . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+}
+
+function time_ago(?string $datetime): string
+{
+    $time = $datetime ? strtotime($datetime) : false;
+    if ($time === false) {
+        return '';
+    }
+
+    $seconds = max(0, time() - $time);
+
+    return match (true) {
+        $seconds < 60 => 'Just now',
+        $seconds < 3600 => intdiv($seconds, 60) . ' min ago',
+        $seconds < 86400 => intdiv($seconds, 3600) . ' h ago',
+        $seconds < 604800 => intdiv($seconds, 86400) . ' d ago',
+        default => date('d M Y', $time),
+    };
 }
 
 function view(string $template, array $data = []): void
