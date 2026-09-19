@@ -11,6 +11,9 @@ final class LogisticsData
 {
     private static ?PDO $db = null;
 
+    /** users.prvg values: 1 may switch into any role, 2 (the default) may not. */
+    private const PRIVILEGES = [1 => '1 - Can switch roles', 2 => '2 - Standard'];
+
     private static function db(): PDO
     {
         if (self::$db instanceof PDO) {
@@ -33,6 +36,7 @@ final class LogisticsData
             $column === 'Warehouse' => self::columnValues('warehouses', 'warehouse_name'),
             $column === 'Supplier' => self::columnValues('suppliers', 'supplier_name'),
             $column === 'Role' => self::columnValues('roles', 'role_name'),
+            $column === 'Privilege' => array_values(self::PRIVILEGES),
             $column === 'Department' => ['Operations', 'Fleet', 'Warehouse', 'Finance', 'Management', 'Administration'],
             $column === 'Category' => ['Fuel', 'Toll', 'Repair', 'Allowance', 'Parking', 'Insurance'],
             $column === 'Priority' => ['Urgent', 'High', 'Normal', 'Low'],
@@ -210,7 +214,7 @@ final class LogisticsData
             'reports' => ['title' => 'Reports', 'kicker' => 'Insights and exports', 'description' => 'Review utilization, fuel, delivery, maintenance, driver and expense reports.', 'button' => 'Add report', 'columns' => ['Report', 'Period', 'Owner', 'Last generated', 'Format', 'Action'], 'required' => ['Report', 'Period', 'Owner', 'Format', 'Action']],
             'deliveries' => ['title' => 'Deliveries', 'kicker' => 'Proof of delivery', 'description' => 'Monitor delivery progress, recipients, signatures and delivery documents.', 'button' => 'Create delivery', 'columns' => ['Delivery', 'Trip', 'Recipient', 'Destination', 'Status', 'Proof file', 'Signature file', 'Delivered at'], 'required' => ['Delivery', 'Recipient', 'Destination', 'Status']],
             'procurement' => ['title' => 'Procurement', 'kicker' => 'Purchasing workflow', 'description' => 'Manage suppliers, quotations, purchase orders and goods received.', 'button' => 'New purchase request', 'columns' => ['Request', 'Description', 'Supplier', 'Amount', 'Requested by', 'Status'], 'required' => ['Request', 'Description', 'Amount', 'Status']],
-            'users' => ['title' => 'Users & permissions', 'kicker' => 'Access control', 'description' => 'Manage system users, roles, access permissions and account status.', 'button' => 'Add user', 'columns' => ['User', 'Email', 'Role', 'Department', 'Phone', 'Last login', 'Status'], 'required' => ['User', 'Email', 'Role', 'Status']],
+            'users' => ['title' => 'Users & permissions', 'kicker' => 'Access control', 'description' => 'Manage system users, roles, access permissions and account status.', 'button' => 'Add user', 'columns' => ['User', 'Email', 'Role', 'Department', 'Phone', 'Last login', 'Status', 'Privilege'], 'required' => ['User', 'Email', 'Role', 'Status']],
         ];
 
         if (!isset($definitions[$key])) {
@@ -233,7 +237,7 @@ final class LogisticsData
             'warehouse' => self::fetchRows('SELECT i.item_name, i.sku, w.warehouse_name, i.quantity, i.minimum_level, i.unit_cost, i.status FROM inventory_items i INNER JOIN warehouses w ON w.id = i.warehouse_id ORDER BY i.id DESC', static fn ($row) => [$row['item_name'], $row['sku'], $row['warehouse_name'], self::decimal($row['quantity']), self::decimal($row['minimum_level']), self::decimal($row['unit_cost']), self::label($row['status'])]),
             'maintenance' => self::fetchRows('SELECT m.work_order_code, COALESCE(v.plate_number, "") vehicle, m.service_name, m.provider_name, m.priority, m.estimated_cost, m.status, m.due_date, m.completed_at FROM maintenance_orders m LEFT JOIN vehicles v ON v.id = m.vehicle_id ORDER BY m.id DESC', static fn ($row) => [$row['work_order_code'], $row['vehicle'], $row['service_name'], $row['provider_name'], self::label($row['priority']), self::decimal($row['estimated_cost']), self::label($row['status']), self::formatDate($row['due_date']), self::formatDateTime($row['completed_at'])]),
             'procurement' => self::fetchRows('SELECT p.request_code, p.description, COALESCE(s.supplier_name, "") supplier, p.amount, COALESCE(u.full_name, "") requested_by, p.status FROM purchase_requests p LEFT JOIN suppliers s ON s.id = p.supplier_id LEFT JOIN users u ON u.id = p.requested_by ORDER BY p.id DESC', static fn ($row) => [$row['request_code'], $row['description'], $row['supplier'], self::decimal($row['amount']), $row['requested_by'], self::label($row['status'])]),
-            'users' => self::fetchRows('SELECT u.full_name, u.email, r.role_name, u.department, u.phone, u.last_login_at, u.status FROM users u INNER JOIN roles r ON r.id = u.role_id ORDER BY u.id DESC', static fn ($row) => [$row['full_name'], $row['email'], $row['role_name'], $row['department'], $row['phone'], self::formatDateTime($row['last_login_at']), self::label($row['status'])]),
+            'users' => self::fetchRows('SELECT u.full_name, u.email, r.role_name, u.department, u.phone, u.last_login_at, u.status, u.prvg FROM users u INNER JOIN roles r ON r.id = u.role_id ORDER BY u.id DESC', static fn ($row) => [$row['full_name'], $row['email'], $row['role_name'], $row['department'], $row['phone'], self::formatDateTime($row['last_login_at']), self::label($row['status']), self::PRIVILEGES[(int) $row['prvg']] ?? self::PRIVILEGES[2]]),
             'reports' => self::fetchRows('SELECT report_name, period_label, owner_name, last_generated_at, format_label, action_label FROM reports ORDER BY id', static fn ($row) => [$row['report_name'], $row['period_label'], $row['owner_name'], self::formatDateTime($row['last_generated_at']), $row['format_label'], $row['action_label']]),
             default => [],
         };
@@ -346,13 +350,18 @@ final class LogisticsData
     private static function saveUser(?string $id, array $values): string
     {
         $roleId = self::idBy('roles', 'role_name', $values[2]);
-        $sql = $id === null
-            ? 'INSERT INTO users (full_name, email, role_id, department, phone, last_login_at, status, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-            : 'UPDATE users SET full_name = ?, email = ?, role_id = ?, department = ?, phone = ?, last_login_at = ?, status = ? WHERE full_name = ?';
+        // Only a privileged user (prvg 1) may grant or change privileges; everyone else leaves it untouched (new users get 2).
+        $prvg = \current_prvg() === 1 ? (array_search($values[7] ?? '', self::PRIVILEGES, true) ?: 2) : null;
         $params = [$values[0], $values[1], $roleId, self::nullable($values[3] ?? ''), self::nullable($values[4] ?? ''), self::nullable($values[5] ?? ''), self::enum($values[6])];
         if ($id === null) {
+            $sql = 'INSERT INTO users (full_name, email, role_id, department, phone, last_login_at, status, prvg, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            $params[] = $prvg ?? 2;
             $params[] = password_hash('password', PASSWORD_DEFAULT);
         } else {
+            $sql = 'UPDATE users SET full_name = ?, email = ?, role_id = ?, department = ?, phone = ?, last_login_at = ?, status = ?' . ($prvg !== null ? ', prvg = ?' : '') . ' WHERE full_name = ?';
+            if ($prvg !== null) {
+                $params[] = $prvg;
+            }
             $params[] = $id;
         }
         self::execute($sql, $params);
