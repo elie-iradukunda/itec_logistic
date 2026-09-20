@@ -227,8 +227,10 @@ Module records are read from and written to MySQL through `app/Models/LogisticsD
 Through XAMPP, open:
 
 ```text
-http://localhost/itec_logistic/
+http://localhost/logistics-mvc/
 ```
+
+The current router uses path URLs, not the old `?route=home` query format. The home page is `/`, the dashboard is `/dashboard`, and modules are paths such as `/vehicles`, `/trips`, and `/reports`.
 
 Or run PHP's built-in server from the project root:
 
@@ -346,7 +348,7 @@ Every module also has these sub-routes, where `{id}` is the record's first-colum
 - `/{module}/{id}/toggle` - change status (POST)
 - `/{module}/{id}/delete` - delete with reason (POST)
 
-Under Apache the root `.htaccess` forwards every request to `public/`, so `mod_rewrite` and `AllowOverride All` are required. The base path comes from `app.base_url` in `config/config.php` (`/itec_logistic`); PHP's built-in server ignores it.
+Under Apache the root `.htaccess` forwards every request to `public/`, so `mod_rewrite` and `AllowOverride All` are required. The base path comes from `app.base_url` in `config/config.php`; this workspace defaults to `/logistics-mvc`. If the project folder is different, set `LOGISTICS_BASE_URL` or update `config/config.php`.
 
 ## Completed Improvement Checklist
 
