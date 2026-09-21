@@ -13,6 +13,7 @@ use Core\Database;
 final class Reference
 {
     private const ALLOWED = [
+        'warehouses' => 'warehouse_code',
         'vehicle_documents' => 'document_code',
         'maintenance_orders' => 'work_order_code',
         'transport_requests' => 'reference_code',

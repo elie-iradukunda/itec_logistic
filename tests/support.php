@@ -12,7 +12,14 @@ declare(strict_types=1);
  */
 
 /** @return array{0: PDO, 1: PDO, 2: string} [$pdo, $root, $dbName] */
-function test_database(string $prefix, bool $reseedTwice = false): array
+/**
+ * A throwaway database for one suite.
+ *
+ * `$withDemo` is what separates the suites that assert against the worked
+ * example from the one that proves a brand new installation can be filled in
+ * from the front end with nothing in it.
+ */
+function test_database(string $prefix, bool $reseedTwice = false, bool $withDemo = true): array
 {
     $dbName = $prefix . '_' . date('YmdHis') . '_' . substr(bin2hex(random_bytes(3)), 0, 6);
 
@@ -32,6 +39,18 @@ function test_database(string $prefix, bool $reseedTwice = false): array
     $root = new PDO(sprintf('mysql:host=%s;charset=%s', $db['host'], $db['charset']), $db['user'], $db['pass'], $options);
     $root->exec("DROP DATABASE IF EXISTS `{$dbName}`");
 
+    // Every suite ends by calling TestRun::finish(), which calls exit() — and
+    // exit() does not run `finally`. Relying on those blocks left one throwaway
+    // database behind per run, so the drop is registered here instead, where it
+    // survives any way the script ends.
+    register_shutdown_function(static function () use ($root, $dbName): void {
+        try {
+            $root->exec("DROP DATABASE IF EXISTS `{$dbName}`");
+        } catch (Throwable) {
+            // A suite that killed the connection has nothing left to clean up with.
+        }
+    });
+
     $rewrite = static fn (string $path): string => str_replace('logistics_mvc', $dbName, (string) file_get_contents($path));
 
     $root->exec($rewrite(__DIR__ . '/../database/schema.sql'));
@@ -44,12 +63,22 @@ function test_database(string $prefix, bool $reseedTwice = false): array
         $pdo->exec((string) file_get_contents($migration));
     }
 
+    // Most suites assert against the worked example, so they load the demo seeds
+    // a plain migration leaves out.
     $seeds = [
         __DIR__ . '/../database/seed.sql',
-        __DIR__ . '/../database/seed_company_scenario.sql',
-        __DIR__ . '/../database/seed_extended.sql',
         __DIR__ . '/../database/seed_accounting.sql',
     ];
+
+    if ($withDemo) {
+        array_push(
+            $seeds,
+            __DIR__ . '/../database/seed_demo_base.sql',
+            __DIR__ . '/../database/seed_company_scenario.sql',
+            __DIR__ . '/../database/seed_extended.sql',
+            __DIR__ . '/../database/seed_accounting_demo.sql',
+        );
+    }
 
     // Running the seeds twice proves they are idempotent.
     foreach (range(1, $reseedTwice ? 2 : 1) as $ignored) {

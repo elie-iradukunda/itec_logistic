@@ -21,7 +21,8 @@ namespace Models;
  *   relation  ['table','label','where','empty'] for `relation`
  *   auto      reference prefix; the code is generated when the user leaves it blank
  *   suffix    unit shown inside the input group (kg, L, km, %)
- *   readonly  set by the workflow, never typed by hand
+ *   readonly  set by the system, never typed by hand
+ *   readonly_note  the word on the badge next to a readonly label (default "calculated")
  */
 final class Schema
 {
@@ -73,6 +74,12 @@ final class Schema
         return $module;
     }
 
+    /** Drop the built registry so a freshly edited reference list is read again. */
+    public static function flush(): void
+    {
+        self::$modules = null;
+    }
+
     /** @return array<string, array> */
     public static function all(): array
     {
@@ -90,6 +97,7 @@ final class Schema
             self::$modules[$key]['filters'] ??= [];
             self::$modules[$key]['related'] ??= [];
             self::$modules[$key]['actions'] ??= [];
+            self::$modules[$key]['links'] ??= [];
         }
 
         return self::$modules;
@@ -112,9 +120,39 @@ final class Schema
     }
 
     /** Fields the user actually types, i.e. everything the workflow does not own. */
-    public static function editableFields(string $key): array
+    /**
+     * The fields a role may actually write.
+     *
+     * `readonly` fields are calculated by the system and nobody types them.
+     * `locked_for` is narrower: the field belongs to someone else's job. A driver
+     * opens the delivery he is carrying and fills in the proof, the signature and
+     * the time — but the address it was supposed to go to is not his to change,
+     * so it is shown to him and refused from him.
+     */
+    public static function editableFields(string $key, ?string $role = null): array
     {
-        return array_filter(self::fields($key), static fn (array $field): bool => empty($field['readonly']));
+        return array_filter(self::fields($key), static function (array $field) use ($role): bool {
+            if (!empty($field['readonly'])) {
+                return false;
+            }
+
+            return $role === null || !in_array($role, $field['locked_for'] ?? [], true);
+        });
+    }
+
+    /** The module as one role sees it: fields that are not theirs come back locked. */
+    public static function forRole(string $key, string $role): array
+    {
+        $module = self::get($key);
+
+        foreach ($module['fields'] as $name => $field) {
+            if (in_array($role, $field['locked_for'] ?? [], true)) {
+                $module['fields'][$name]['readonly'] = true;
+                $module['fields'][$name]['readonly_note'] = $field['locked_note'] ?? 'set by the office';
+            }
+        }
+
+        return $module;
     }
 
     // ----------------------------------------------------------------- fleet
@@ -159,7 +197,7 @@ final class Schema
                 ],
                 'fields' => [
                     'plate_number' => ['label' => 'Plate number', 'type' => 'text', 'required' => true, 'width' => 4, 'placeholder' => 'RAC 482D', 'help' => 'Must be unique across the fleet.'],
-                    'vehicle_type' => ['label' => 'Vehicle type', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::listOptions(['Delivery truck', 'Box truck', 'Refrigerated truck', 'Pickup', 'Van', 'Tanker', 'Trailer', 'Motorcycle'])],
+                    'vehicle_type' => ['label' => 'Vehicle type', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => Lookup::options('vehicle_type')],
                     'make' => ['label' => 'Make', 'type' => 'text', 'width' => 4, 'placeholder' => 'Toyota'],
                     'model' => ['label' => 'Model', 'type' => 'text', 'width' => 4, 'placeholder' => 'Dyna'],
                     'manufacture_year' => ['label' => 'Year of manufacture', 'type' => 'number', 'width' => 4, 'min' => 1970, 'max' => 2100],
@@ -235,7 +273,7 @@ final class Schema
                     'phone' => ['label' => 'Phone', 'type' => 'tel', 'width' => 4, 'placeholder' => '+250 788 000 000'],
                     'address' => ['label' => 'Address', 'type' => 'text', 'width' => 4],
                     'license_number' => ['label' => 'Licence number', 'type' => 'text', 'required' => true, 'width' => 4, 'help' => 'Must be unique.'],
-                    'license_class' => ['label' => 'Licence class', 'type' => 'select', 'width' => 4, 'options' => self::listOptions(['A', 'B', 'C', 'D', 'E', 'B/C', 'C/D'])],
+                    'license_class' => ['label' => 'Licence class', 'type' => 'select', 'width' => 4, 'options' => Lookup::options('licence_class')],
                     'license_expiry' => ['label' => 'Licence expiry', 'type' => 'date', 'required' => true, 'width' => 4],
                     'hired_on' => ['label' => 'Hired on', 'type' => 'date', 'width' => 4],
                     'user_id' => ['label' => 'Linked login account', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => "status = 'active' AND deleted_at IS NULL"], 'help' => 'Links this driver to a login so the driver dashboard shows their own trips.'],
@@ -415,7 +453,7 @@ final class Schema
                 ],
                 'fields' => [
                     'reference_code' => ['label' => 'Request reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'REQ'],
-                    'requester_id' => ['label' => 'Requested by', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => 'deleted_at IS NULL']],
+                    'requester_id' => ['label' => 'Requested by', 'type' => 'relation', 'width' => 4, 'readonly' => true, 'readonly_note' => 'you', 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Whoever is signed in when the request is raised. It is recorded, not chosen.'],
                     'customer_id' => ['label' => 'Customer', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'customers', 'label' => 'customer_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Leave blank for an internal movement.'],
                     'priority' => ['label' => 'Priority', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::PRIORITY],
                     'pickup_location' => ['label' => 'Pickup location', 'type' => 'text', 'required' => true, 'width' => 6, 'placeholder' => 'Kigali Central Warehouse'],
@@ -436,7 +474,14 @@ final class Schema
                 'actions' => [
                     'approve' => ['label' => 'Approve request', 'to' => 'approved', 'from' => ['pending'], 'tone' => 'success'],
                     'reject' => ['label' => 'Reject', 'to' => 'rejected', 'from' => ['pending'], 'tone' => 'danger', 'reason' => true],
-                    'assign' => ['label' => 'Plan trip', 'to' => 'assigned', 'from' => ['approved'], 'tone' => 'primary', 'redirect' => 'trips/create'],
+                ],
+                // Not a status change: it opens the trip form with this request
+                // already in it. The request turns Assigned when that trip is saved.
+                'links' => [
+                    ['label' => 'Plan trip', 'icon' => 'navigation', 'tone' => 'primary',
+                     'permission' => 'trips', 'ability' => 'create', 'when' => ['status' => ['approved']],
+                     'route' => ['trips', 'create'], 'carry' => ['request_id' => 'id'],
+                     'hint' => 'Opens a new trip with this request, its customer and its route already filled in.'],
                 ],
             ],
 
@@ -451,6 +496,8 @@ final class Schema
                 'alias' => 't',
                 'code' => 'reference_code',
                 'order' => 't.id DESC',
+                // Moving a trip to another request has to release the old one.
+                'track_changes' => true,
                 'joins' => 'LEFT JOIN vehicles v ON v.id = t.vehicle_id LEFT JOIN drivers d ON d.id = t.driver_id LEFT JOIN customers c ON c.id = t.customer_id LEFT JOIN transport_requests rq ON rq.id = t.request_id',
                 'select' => ['t.id', 't.reference_code', 'rq.reference_code AS request', 'c.customer_name AS customer', 't.trip_type', 't.pickup_location', 't.destination', 't.planned_arrival_at', 't.departure_at', 't.arrival_at', 'v.plate_number AS vehicle', 'd.full_name AS driver', 't.status'],
                 'search' => ['t.reference_code', 't.pickup_location', 't.destination', 'v.plate_number', 'd.full_name'],
@@ -479,18 +526,18 @@ final class Schema
                     ['title' => 'Notes', 'icon' => 'file-text', 'fields' => ['notes']],
                 ],
                 'fields' => [
-                    'reference_code' => ['label' => 'Trip reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'TRP'],
-                    'request_id' => ['label' => 'Fulfils request', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'transport_requests', 'label' => 'reference_code', 'where' => "status IN ('approved','assigned') AND deleted_at IS NULL"], 'help' => 'Approving the link moves the request to Assigned.'],
-                    'customer_id' => ['label' => 'Customer', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'customers', 'label' => 'customer_name', 'where' => 'deleted_at IS NULL']],
-                    'trip_type' => ['label' => 'Trip type', 'type' => 'select', 'width' => 4, 'options' => ['delivery' => 'Delivery', 'collection' => 'Collection', 'transfer' => 'Transfer', 'return' => 'Return', 'shuttle' => 'Shuttle']],
-                    'pickup_location' => ['label' => 'Pickup location', 'type' => 'text', 'required' => true, 'width' => 6],
-                    'destination' => ['label' => 'Final destination', 'type' => 'text', 'required' => true, 'width' => 6],
-                    'cargo_summary' => ['label' => 'Cargo summary', 'type' => 'text', 'width' => 12, 'placeholder' => '40 sacks maize flour, 12 cold-chain crates'],
-                    'planned_departure_at' => ['label' => 'Planned departure', 'type' => 'datetime', 'width' => 6],
-                    'planned_arrival_at' => ['label' => 'Planned arrival', 'type' => 'datetime', 'width' => 6, 'help' => 'Leave blank if the trip has no committed arrival time.'],
-                    'vehicle_id' => ['label' => 'Vehicle', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'vehicles', 'label' => 'plate_number', 'where' => "status <> 'inactive' AND deleted_at IS NULL"]],
-                    'driver_id' => ['label' => 'Driver', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'drivers', 'label' => 'full_name', 'where' => "status <> 'inactive' AND deleted_at IS NULL"]],
-                    'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::TRIP_STATUS],
+                    'reference_code' => ['label' => 'Trip reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'TRP', 'locked_for' => ['driver']],
+                    'request_id' => ['label' => 'Fulfils request', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'transport_requests', 'label' => 'reference_code', 'where' => "status IN ('approved','assigned') AND deleted_at IS NULL"], 'help' => 'Saving this trip marks that request Assigned and links the two.', 'locked_for' => ['driver']],
+                    'customer_id' => ['label' => 'Customer', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'customers', 'label' => 'customer_name', 'where' => 'deleted_at IS NULL'], 'locked_for' => ['driver']],
+                    'trip_type' => ['label' => 'Trip type', 'type' => 'select', 'width' => 4, 'options' => ['delivery' => 'Delivery', 'collection' => 'Collection', 'transfer' => 'Transfer', 'return' => 'Return', 'shuttle' => 'Shuttle'], 'locked_for' => ['driver']],
+                    'pickup_location' => ['label' => 'Pickup location', 'type' => 'text', 'required' => true, 'width' => 6, 'locked_for' => ['driver']],
+                    'destination' => ['label' => 'Final destination', 'type' => 'text', 'required' => true, 'width' => 6, 'locked_for' => ['driver']],
+                    'cargo_summary' => ['label' => 'Cargo summary', 'type' => 'text', 'width' => 12, 'placeholder' => '40 sacks maize flour, 12 cold-chain crates', 'locked_for' => ['driver']],
+                    'planned_departure_at' => ['label' => 'Planned departure', 'type' => 'datetime', 'width' => 6, 'locked_for' => ['driver']],
+                    'planned_arrival_at' => ['label' => 'Planned arrival', 'type' => 'datetime', 'width' => 6, 'help' => 'Leave blank if the trip has no committed arrival time.', 'locked_for' => ['driver']],
+                    'vehicle_id' => ['label' => 'Vehicle', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'vehicles', 'label' => 'plate_number', 'where' => "status <> 'inactive' AND deleted_at IS NULL"], 'locked_for' => ['driver']],
+                    'driver_id' => ['label' => 'Driver', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'drivers', 'label' => 'full_name', 'where' => "status <> 'inactive' AND deleted_at IS NULL"], 'locked_for' => ['driver']],
+                    'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::TRIP_STATUS, 'locked_for' => ['driver']],
                     'departure_at' => ['label' => 'Actual departure', 'type' => 'datetime', 'width' => 6],
                     'arrival_at' => ['label' => 'Actual arrival', 'type' => 'datetime', 'width' => 6],
                     'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12],
@@ -531,6 +578,13 @@ final class Schema
                     'dispatch' => ['label' => 'Dispatch trip', 'to' => 'in_transit', 'from' => ['requested', 'approved', 'loading'], 'tone' => 'primary'],
                     'complete' => ['label' => 'Mark delivered', 'to' => 'delivered', 'from' => ['loading', 'in_transit'], 'tone' => 'success'],
                     'reject' => ['label' => 'Cancel trip', 'to' => 'cancelled', 'from' => ['requested', 'approved', 'loading'], 'tone' => 'danger', 'reason' => true],
+                ],
+                'links' => [
+                    ['label' => 'Record delivery', 'icon' => 'check-square', 'tone' => 'outline-primary',
+                     'permission' => 'deliveries', 'ability' => 'create',
+                     'when' => ['status' => ['requested', 'approved', 'loading', 'in_transit']],
+                     'route' => ['deliveries', 'create'], 'carry' => ['trip_id' => 'id'],
+                     'hint' => 'Opens a delivery for this trip, already set to the state the trip is in.'],
                 ],
             ],
 
@@ -637,15 +691,15 @@ final class Schema
                     ['title' => 'Exception', 'icon' => 'alert-triangle', 'hint' => 'Fill this in only when the delivery failed, then reschedule it.', 'fields' => ['failure_reason', 'failure_notes', 'rescheduled_at']],
                 ],
                 'fields' => [
-                    'delivery_code' => ['label' => 'Delivery reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'DEL'],
-                    'trip_id' => ['label' => 'Trip', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL']],
-                    'shipment_id' => ['label' => 'Shipment', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'shipments', 'label' => 'shipment_code', 'where' => 'deleted_at IS NULL']],
-                    'attempt_number' => ['label' => 'Attempt number', 'type' => 'number', 'width' => 4, 'min' => 1, 'help' => 'Increase when you re-deliver after a failure.'],
-                    'recipient_name' => ['label' => 'Recipient name', 'type' => 'text', 'required' => true, 'width' => 4],
-                    'recipient_phone' => ['label' => 'Recipient phone', 'type' => 'tel', 'width' => 4],
-                    'destination' => ['label' => 'Delivery address', 'type' => 'text', 'required' => true, 'width' => 4],
-                    'planned_at' => ['label' => 'Planned for', 'type' => 'datetime', 'width' => 4],
-                    'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::DELIVERY_STATUS],
+                    'delivery_code' => ['label' => 'Delivery reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'DEL', 'locked_for' => ['driver']],
+                    'trip_id' => ['label' => 'Trip', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL'], 'locked_for' => ['driver']],
+                    'shipment_id' => ['label' => 'Shipment', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'shipments', 'label' => 'shipment_code', 'where' => 'deleted_at IS NULL'], 'locked_for' => ['driver']],
+                    'attempt_number' => ['label' => 'Attempt number', 'type' => 'number', 'width' => 4, 'min' => 1, 'help' => 'Increase when you re-deliver after a failure.', 'locked_for' => ['driver']],
+                    'recipient_name' => ['label' => 'Recipient name', 'type' => 'text', 'required' => true, 'width' => 4, 'locked_for' => ['driver']],
+                    'recipient_phone' => ['label' => 'Recipient phone', 'type' => 'tel', 'width' => 4, 'locked_for' => ['driver']],
+                    'destination' => ['label' => 'Delivery address', 'type' => 'text', 'required' => true, 'width' => 4, 'locked_for' => ['driver']],
+                    'planned_at' => ['label' => 'Planned for', 'type' => 'datetime', 'width' => 4, 'locked_for' => ['driver']],
+                    'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::DELIVERY_STATUS, 'locked_for' => ['driver']],
                     'delivered_at' => ['label' => 'Delivered at', 'type' => 'datetime', 'width' => 4],
                     'proof_file' => ['label' => 'Proof of delivery', 'type' => 'file', 'width' => 6, 'help' => 'Signed delivery note, photo or PDF.'],
                     'recipient_signature' => ['label' => 'Recipient signature', 'type' => 'file', 'width' => 6],
@@ -769,7 +823,7 @@ final class Schema
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['active' => 'Active', 'draft' => 'Draft', 'expired' => 'Expired']],
                     'origin' => ['label' => 'Origin', 'type' => 'text', 'required' => true, 'width' => 4],
                     'destination' => ['label' => 'Destination', 'type' => 'text', 'required' => true, 'width' => 4],
-                    'vehicle_type' => ['label' => 'Vehicle type', 'type' => 'select', 'width' => 4, 'options' => self::listOptions(['Delivery truck', 'Box truck', 'Refrigerated truck', 'Pickup', 'Van', 'Tanker', 'Trailer', 'Motorcycle'])],
+                    'vehicle_type' => ['label' => 'Vehicle type', 'type' => 'select', 'width' => 4, 'options' => Lookup::options('vehicle_type')],
                     'rate_type' => ['label' => 'Charging basis', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['per_trip' => 'Per trip', 'per_kg' => 'Per kilogram', 'per_m3' => 'Per cubic metre', 'per_package' => 'Per package', 'per_day' => 'Per day']],
                     'rate_amount' => ['label' => 'Rate amount', 'type' => 'money', 'required' => true, 'width' => 4],
                     'minimum_charge' => ['label' => 'Minimum charge', 'type' => 'money', 'width' => 4],
@@ -816,7 +870,7 @@ final class Schema
                     'method' => ['label' => 'Method', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['cash' => 'Cash', 'bank_transfer' => 'Bank transfer', 'mobile_money' => 'Mobile money', 'cheque' => 'Cheque', 'card' => 'Card']],
                     'reference' => ['label' => 'Bank or till reference', 'type' => 'text', 'width' => 4, 'placeholder' => 'BK-778120'],
                     'paid_at' => ['label' => 'Received at', 'type' => 'datetime', 'required' => true, 'width' => 4],
-                    'recorded_by' => ['label' => 'Recorded by', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => 'deleted_at IS NULL']],
+                    'recorded_by' => ['label' => 'Recorded by', 'type' => 'relation', 'width' => 4, 'readonly' => true, 'readonly_note' => 'you', 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Whoever is signed in when the payment is entered. It is recorded, not chosen.'],
                     'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12],
                 ],
             ],
@@ -928,7 +982,7 @@ final class Schema
                 'sections' => [
                     ['title' => 'Purchase', 'icon' => 'droplet', 'fields' => ['reference_code', 'vehicle_id', 'station_name', 'fuel_type', 'purchased_at']],
                     ['title' => 'Quantity and price', 'icon' => 'dollar-sign', 'fields' => ['litres', 'unit_price', 'is_full_tank']],
-                    ['title' => 'Odometer', 'icon' => 'activity', 'hint' => 'Previous reading is filled in from the last fill-up so litres per 100 km can be worked out.', 'fields' => ['previous_mileage', 'mileage']],
+                    ['title' => 'Odometer', 'icon' => 'activity', 'hint' => 'The number on the dashboard when the tank was filled. It keeps the vehicle record current and catches a reading typed backwards. Litres per 100 km arrives with the distance phase.', 'fields' => ['previous_mileage', 'mileage']],
                     ['title' => 'Attribution', 'icon' => 'user', 'fields' => ['driver_id', 'trip_id']],
                     ['title' => 'Receipt', 'icon' => 'paperclip', 'fields' => ['receipt_file', 'notes']],
                 ],
@@ -941,9 +995,9 @@ final class Schema
                     'litres' => ['label' => 'Litres', 'type' => 'decimal', 'required' => true, 'width' => 4, 'suffix' => 'L'],
                     'unit_price' => ['label' => 'Price per litre', 'type' => 'money', 'required' => true, 'width' => 4],
                     'is_full_tank' => ['label' => 'Tank filled to full', 'type' => 'checkbox', 'width' => 4, 'help' => 'Consumption is only accurate between two full-tank fill-ups.'],
-                    'previous_mileage' => ['label' => 'Previous odometer', 'type' => 'number', 'width' => 4, 'suffix' => 'km', 'readonly' => true],
-                    'mileage' => ['label' => 'Odometer now', 'type' => 'number', 'required' => true, 'width' => 4, 'suffix' => 'km', 'help' => 'Must be at least the previous reading.'],
-                    'driver_id' => ['label' => 'Driver', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'drivers', 'label' => 'full_name', 'where' => 'deleted_at IS NULL']],
+                    'previous_mileage' => ['label' => 'Previous odometer', 'type' => 'number', 'width' => 4, 'suffix' => 'km', 'readonly' => true, 'help' => 'The highest reading already recorded for this vehicle. You cannot type it.'],
+                    'mileage' => ['label' => 'Odometer now', 'type' => 'number', 'required' => true, 'width' => 4, 'suffix' => 'km', 'help' => 'Read it off the dashboard at the pump. It cannot be lower than the previous reading.'],
+                    'driver_id' => ['label' => 'Driver', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'drivers', 'label' => 'full_name', 'where' => 'deleted_at IS NULL'], 'locked_for' => ['driver'], 'locked_note' => 'you', 'help' => 'Who bought the fuel. A driver recording their own fill-up is filled in automatically.'],
                     'trip_id' => ['label' => 'Trip', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL']],
                     'receipt_file' => ['label' => 'Receipt', 'type' => 'file', 'width' => 6],
                     'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12],
@@ -977,7 +1031,7 @@ final class Schema
                 ],
                 'filters' => [
                     'status' => ['label' => 'Status', 'column' => 'e.status', 'options' => self::APPROVAL_STATUS],
-                    'category' => ['label' => 'Category', 'column' => 'e.category', 'options' => self::listOptions(['Fuel', 'Toll', 'Repair', 'Allowance', 'Parking', 'Insurance', 'Loading', 'Permit'])],
+                    'category' => ['label' => 'Category', 'column' => 'e.category', 'options' => Lookup::options('expense_category')],
                 ],
                 'sections' => [
                     ['title' => 'Expense', 'icon' => 'credit-card', 'fields' => ['reference_code', 'category', 'amount', 'expense_date']],
@@ -987,12 +1041,12 @@ final class Schema
                 ],
                 'fields' => [
                     'reference_code' => ['label' => 'Reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'EXP'],
-                    'category' => ['label' => 'Category', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::listOptions(['Fuel', 'Toll', 'Repair', 'Allowance', 'Parking', 'Insurance', 'Loading', 'Permit'])],
+                    'category' => ['label' => 'Category', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => Lookup::options('expense_category')],
                     'amount' => ['label' => 'Amount', 'type' => 'money', 'required' => true, 'width' => 4],
                     'expense_date' => ['label' => 'Expense date', 'type' => 'date', 'required' => true, 'width' => 4],
                     'vehicle_id' => ['label' => 'Vehicle', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'vehicles', 'label' => 'plate_number', 'where' => 'deleted_at IS NULL']],
                     'trip_id' => ['label' => 'Trip', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL']],
-                    'submitted_by' => ['label' => 'Submitted by', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => 'deleted_at IS NULL']],
+                    'submitted_by' => ['label' => 'Submitted by', 'type' => 'relation', 'width' => 4, 'readonly' => true, 'readonly_note' => 'you', 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Whoever is signed in when the claim is filed. It is recorded, not chosen.'],
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::APPROVAL_STATUS],
                     'payment_method' => ['label' => 'Payment method', 'type' => 'select', 'width' => 4, 'options' => ['cash' => 'Cash', 'bank_transfer' => 'Bank transfer', 'mobile_money' => 'Mobile money', 'fuel_card' => 'Fuel card', 'cheque' => 'Cheque']],
                     'receipt_file' => ['label' => 'Receipt', 'type' => 'file', 'width' => 6],
@@ -1011,6 +1065,53 @@ final class Schema
     private static function warehouse(): array
     {
         return [
+            'warehouses' => [
+                'title' => 'Warehouses',
+                'singular' => 'Warehouse',
+                'kicker' => 'Storage sites',
+                'icon' => 'home',
+                'description' => 'The stores and depots stock is held in. Every stock item belongs to one of these, so at least one must exist before anything can be received.',
+                'button' => 'Add warehouse',
+                'table' => 'warehouses',
+                'alias' => 'wh',
+                'code' => 'warehouse_name',
+                'order' => 'wh.warehouse_name',
+                'joins' => 'LEFT JOIN users mu ON mu.id = wh.manager_id',
+                'select' => ['wh.id', 'wh.warehouse_code', 'wh.warehouse_name', 'wh.location', 'mu.full_name AS manager', 'wh.phone', 'wh.capacity_m3', 'wh.is_cold_chain', 'wh.status'],
+                'search' => ['wh.warehouse_name', 'wh.warehouse_code', 'wh.location', 'wh.phone'],
+                'list' => [
+                    'warehouse_code' => ['label' => 'Code', 'type' => 'code', 'empty' => 'No code'],
+                    'warehouse_name' => ['label' => 'Warehouse'],
+                    'location' => ['label' => 'Location'],
+                    'manager' => ['label' => 'Manager', 'empty' => 'Unassigned'],
+                    'phone' => ['label' => 'Phone'],
+                    'capacity_m3' => ['label' => 'Capacity', 'type' => 'decimal', 'suffix' => 'm3'],
+                    'is_cold_chain' => ['label' => 'Cold chain', 'type' => 'yesno'],
+                    'status' => ['label' => 'Status', 'type' => 'badge'],
+                ],
+                'filters' => ['status' => ['label' => 'Status', 'column' => 'wh.status', 'options' => ['active' => 'Active', 'inactive' => 'Inactive']]],
+                'sections' => [
+                    ['title' => 'Warehouse', 'icon' => 'home', 'fields' => ['warehouse_code', 'warehouse_name', 'location', 'status']],
+                    ['title' => 'Contact and capacity', 'icon' => 'phone', 'hint' => 'A cold-chain store is where chilled cargo may be held between trips.', 'fields' => ['manager_id', 'phone', 'capacity_m3', 'is_cold_chain']],
+                ],
+                'fields' => [
+                    'warehouse_code' => ['label' => 'Warehouse code', 'type' => 'text', 'width' => 4, 'auto' => 'WH'],
+                    'warehouse_name' => ['label' => 'Warehouse name', 'type' => 'text', 'required' => true, 'width' => 5, 'placeholder' => 'Kigali Central Warehouse'],
+                    'location' => ['label' => 'Location', 'type' => 'text', 'required' => true, 'width' => 3, 'placeholder' => 'Gikondo, Kigali'],
+                    'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['active' => 'Active', 'inactive' => 'Inactive']],
+                    'manager_id' => ['label' => 'Manager', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => "status = 'active' AND deleted_at IS NULL"]],
+                    'phone' => ['label' => 'Phone', 'type' => 'tel', 'width' => 4],
+                    'capacity_m3' => ['label' => 'Storage capacity', 'type' => 'decimal', 'width' => 4, 'suffix' => 'm3'],
+                    'is_cold_chain' => ['label' => 'Cold chain storage', 'type' => 'checkbox', 'width' => 4],
+                ],
+                'related' => [
+                    ['title' => 'Stock held here', 'icon' => 'package', 'permission' => 'warehouse', 'module' => 'warehouse',
+                     'sql' => 'SELECT id, sku, item_name, quantity, minimum_level, status FROM inventory_items WHERE warehouse_id = :id AND deleted_at IS NULL ORDER BY item_name LIMIT 20',
+                     'columns' => ['sku' => 'SKU', 'item_name' => 'Item', 'quantity' => 'On hand', 'minimum_level' => 'Minimum', 'status' => 'Status'],
+                     'empty' => 'No stock is held here yet.'],
+                ],
+            ],
+
             'warehouse' => [
                 'title' => 'Warehouse and inventory',
                 'singular' => 'Stock item',
@@ -1045,10 +1146,10 @@ final class Schema
                 'fields' => [
                     'sku' => ['label' => 'SKU', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'SKU', 'help' => 'Unique stock keeping unit.'],
                     'item_name' => ['label' => 'Item name', 'type' => 'text', 'required' => true, 'width' => 5],
-                    'category' => ['label' => 'Category', 'type' => 'select', 'width' => 3, 'options' => self::listOptions(['Food', 'Packaging', 'Spare parts', 'Consumables', 'Cold chain', 'Equipment', 'Stationery'])],
+                    'category' => ['label' => 'Category', 'type' => 'select', 'width' => 3, 'options' => Lookup::options('item_category')],
                     'warehouse_id' => ['label' => 'Warehouse', 'type' => 'relation', 'required' => true, 'width' => 4, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => 'deleted_at IS NULL']],
                     'quantity' => ['label' => 'Quantity on hand', 'type' => 'decimal', 'required' => true, 'width' => 4],
-                    'unit_of_measure' => ['label' => 'Unit of measure', 'type' => 'select', 'width' => 4, 'options' => self::listOptions(['Unit', 'Kg', 'Litre', 'Box', 'Sack', 'Crate', 'Pallet', 'Carton'])],
+                    'unit_of_measure' => ['label' => 'Unit of measure', 'type' => 'select', 'width' => 4, 'options' => Lookup::options('unit_of_measure')],
                     'minimum_level' => ['label' => 'Minimum level', 'type' => 'decimal', 'required' => true, 'width' => 4, 'help' => 'Below this the item is flagged for reorder.'],
                     'reorder_quantity' => ['label' => 'Reorder quantity', 'type' => 'decimal', 'width' => 4],
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::STOCK_STATUS],
@@ -1146,7 +1247,7 @@ final class Schema
                 'fields' => [
                     'request_code' => ['label' => 'Request reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'PR'],
                     'description' => ['label' => 'Description', 'type' => 'textarea', 'required' => true, 'width' => 8],
-                    'category' => ['label' => 'Category', 'type' => 'select', 'width' => 4, 'options' => self::listOptions(['Spare parts', 'Fuel', 'Packaging', 'Cold chain', 'Equipment', 'Services', 'Consumables'])],
+                    'category' => ['label' => 'Category', 'type' => 'select', 'width' => 4, 'options' => Lookup::options('supplier_category')],
                     'requested_by' => ['label' => 'Requested by', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => 'deleted_at IS NULL']],
                     'supplier_id' => ['label' => 'Supplier', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'suppliers', 'label' => 'supplier_name', 'where' => "status = 'active' AND deleted_at IS NULL"]],
                     'warehouse_id' => ['label' => 'Deliver to warehouse', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Where received goods will be booked into stock.'],
@@ -1209,7 +1310,7 @@ final class Schema
                 'fields' => [
                     'supplier_code' => ['label' => 'Supplier code', 'type' => 'text', 'width' => 4, 'auto' => 'SUP'],
                     'supplier_name' => ['label' => 'Supplier name', 'type' => 'text', 'required' => true, 'width' => 5],
-                    'category' => ['label' => 'Category', 'type' => 'select', 'width' => 3, 'options' => self::listOptions(['Spare parts', 'Fuel', 'Packaging', 'Cold chain', 'Equipment', 'Services', 'Food'])],
+                    'category' => ['label' => 'Category', 'type' => 'select', 'width' => 3, 'options' => Lookup::options('procurement_category')],
                     'tin_number' => ['label' => 'TIN number', 'type' => 'text', 'width' => 4],
                     'contact_name' => ['label' => 'Contact person', 'type' => 'text', 'width' => 4],
                     'phone' => ['label' => 'Phone', 'type' => 'tel', 'width' => 4],
@@ -1270,11 +1371,52 @@ final class Schema
                     'email' => ['label' => 'Email', 'type' => 'email', 'required' => true, 'width' => 4, 'help' => 'This is the login name and must be unique.'],
                     'phone' => ['label' => 'Phone', 'type' => 'tel', 'width' => 4],
                     'role_id' => ['label' => 'Role', 'type' => 'relation', 'required' => true, 'width' => 4, 'relation' => ['table' => 'roles', 'label' => 'role_name', 'empty' => null]],
-                    'department' => ['label' => 'Department', 'type' => 'select', 'width' => 4, 'options' => self::listOptions(['Operations', 'Fleet', 'Warehouse', 'Finance', 'Management', 'Administration'])],
+                    'department' => ['label' => 'Department', 'type' => 'select', 'width' => 4, 'options' => Lookup::options('department')],
                     'job_title' => ['label' => 'Job title', 'type' => 'text', 'width' => 4],
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['active' => 'Active', 'inactive' => 'Inactive', 'locked' => 'Locked']],
                     'prvg' => ['label' => 'Privilege', 'type' => 'select', 'width' => 4, 'options' => self::PRIVILEGES, 'help' => 'Only a privileged account may change this or switch roles.'],
                     'must_change_password' => ['label' => 'Force password change at next login', 'type' => 'checkbox', 'width' => 4],
+                ],
+            ],
+
+            'lookups' => [
+                'title' => 'Reference lists',
+                'singular' => 'List entry',
+                'kicker' => 'Configuration',
+                'icon' => 'list',
+                'description' => 'The choices the drop-downs offer: vehicle types, expense categories, units of measure, departments and the rest. Add what your company actually hauls, stores and spends on, and retire what it does not. Renaming an entry also renames it on every record that carries it.',
+                'button' => 'Add list entry',
+                'table' => 'lookup_values',
+                'alias' => 'lv',
+                'code' => 'value',
+                'order' => 'lv.list_key, lv.sort_order, lv.value',
+                'select' => ['lv.id', 'lv.list_key', 'lv.value', 'lv.label', 'lv.sort_order', 'lv.is_active', 'lv.notes'],
+                'search' => ['lv.value', 'lv.label', 'lv.notes'],
+                // Renaming has to follow the records, so the row is read before it is written.
+                'track_changes' => true,
+                'list' => [
+                    'list_key' => ['label' => 'List', 'map' => self::lookupLists()],
+                    'value' => ['label' => 'Name', 'type' => 'code'],
+                    'label' => ['label' => 'Shown as'],
+                    'sort_order' => ['label' => 'Order', 'type' => 'number'],
+                    'notes' => ['label' => 'Notes'],
+                    'is_active' => ['label' => 'In use', 'type' => 'yesno'],
+                ],
+                'filters' => [
+                    'list_key' => ['label' => 'List', 'column' => 'lv.list_key', 'options' => self::lookupLists()],
+                    'is_active' => ['label' => 'In use', 'column' => 'lv.is_active', 'options' => [1 => 'Yes', 0 => 'No']],
+                ],
+                'sections' => [
+                    ['title' => 'The choice', 'icon' => 'list', 'hint' => 'Whatever you type here is what the drop-down will offer and what the records will store.', 'fields' => ['list_key', 'value', 'sort_order']],
+                    ['title' => 'How it behaves', 'icon' => 'settings', 'hint' => 'Retiring a choice is almost always better than deleting it: the records that already carry it stay readable.', 'fields' => ['label', 'is_active', 'notes']],
+                ],
+                'fields' => [
+                    'list_key' => ['label' => 'Which list', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::lookupLists(), 'help' => 'The drop-down this choice will appear in.'],
+                    'value' => ['label' => 'Name', 'type' => 'text', 'required' => true, 'width' => 5, 'placeholder' => 'Cement bulker', 'help' => 'Exactly as it should read on the form.'],
+                    'sort_order' => ['label' => 'Position', 'type' => 'number', 'width' => 3, 'help' => 'Lower numbers come first. Leave blank to put it at the end.'],
+                    'label' => ['label' => 'Shown as', 'type' => 'text', 'width' => 4, 'help' => 'Only if the drop-down should read differently from the stored name. Usually left blank.'],
+                    'is_active' => ['label' => 'Offer this choice', 'type' => 'checkbox', 'width' => 4, 'help' => 'Off retires it: existing records keep it, new ones cannot pick it.'],
+                    'notes' => ['label' => 'Notes', 'type' => 'text', 'width' => 4, 'help' => 'Optional — what this choice is for, so the next person does not have to guess.'],
                 ],
             ],
 
@@ -1303,7 +1445,7 @@ final class Schema
                 ],
                 'filters' => [
                     'account_type' => ['label' => 'Type', 'column' => 'ga.account_type', 'options' => self::ACCOUNT_TYPES],
-                    'report_section' => ['label' => 'Section', 'column' => 'ga.report_section', 'options' => self::listOptions(['Cash and bank', 'Accounts receivable', 'Other current assets', 'Fixed assets', 'Accounts payable', 'Other current liabilities', 'Long term liabilities', 'Equity', 'Income', 'Cost of sales', 'Operating expenses', 'Other income', 'Other expenses'])],
+                    'report_section' => ['label' => 'Section', 'column' => 'ga.report_section', 'options' => self::statementSections()],
                 ],
                 'sections' => [
                     ['title' => 'Account', 'icon' => 'hash', 'hint' => 'The code decides where the account sorts; the type decides which statement it lands on.', 'fields' => ['account_code', 'account_name', 'account_type', 'normal_balance']],
@@ -1316,7 +1458,7 @@ final class Schema
                     'account_name' => ['label' => 'Account name', 'type' => 'text', 'required' => true, 'width' => 5],
                     'account_type' => ['label' => 'Type', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::ACCOUNT_TYPES],
                     'normal_balance' => ['label' => 'Normal balance', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['debit' => 'Debit', 'credit' => 'Credit'], 'help' => 'Assets and expenses are debit; income, liabilities and equity are credit.'],
-                    'report_section' => ['label' => 'Statement section', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::listOptions(['Cash and bank', 'Accounts receivable', 'Other current assets', 'Fixed assets', 'Accounts payable', 'Other current liabilities', 'Long term liabilities', 'Equity', 'Income', 'Cost of sales', 'Operating expenses', 'Other income', 'Other expenses'])],
+                    'report_section' => ['label' => 'Statement section', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::statementSections()],
                     'section_order' => ['label' => 'Section order', 'type' => 'number', 'width' => 4, 'help' => 'Lower numbers print first.'],
                     'parent_id' => ['label' => 'Sits under', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'gl_accounts', 'label' => 'account_name', 'where' => 'deleted_at IS NULL AND is_header = 1']],
                     'depth' => ['label' => 'Indent level', 'type' => 'number', 'width' => 4, 'min' => 0, 'max' => 3],
@@ -1369,9 +1511,9 @@ final class Schema
                     'report_name' => ['label' => 'Report name', 'type' => 'text', 'required' => true, 'width' => 6],
                     'report_key' => ['label' => 'Live query', 'type' => 'select', 'width' => 6, 'options' => ReportData::CATALOGUE_LABELS, 'help' => 'Pick the query this catalogue entry runs.'],
                     'description' => ['label' => 'What it answers', 'type' => 'text', 'width' => 12],
-                    'period_label' => ['label' => 'Period', 'type' => 'select', 'required' => true, 'width' => 3, 'options' => self::listOptions(['Daily', 'Weekly', 'Monthly', 'Quarterly', 'Yearly'])],
+                    'period_label' => ['label' => 'Period', 'type' => 'select', 'required' => true, 'width' => 3, 'options' => Lookup::options('report_period')],
                     'owner_name' => ['label' => 'Owner', 'type' => 'text', 'required' => true, 'width' => 3],
-                    'format_label' => ['label' => 'Format', 'type' => 'select', 'required' => true, 'width' => 3, 'options' => self::listOptions(['CSV', 'PDF', 'XLSX'])],
+                    'format_label' => ['label' => 'Format', 'type' => 'select', 'required' => true, 'width' => 3, 'options' => ['CSV' => 'CSV', 'PDF' => 'PDF', 'XLSX' => 'XLSX']],
                     'action_label' => ['label' => 'Action label', 'type' => 'text', 'width' => 3],
                 ],
             ],
@@ -1380,10 +1522,24 @@ final class Schema
 
     // ---------------------------------------------------------------- helpers
 
-    /** ['Fuel', 'Toll'] becomes ['Fuel' => 'Fuel', 'Toll' => 'Toll'] for free-text option lists. */
-    private static function listOptions(array $values): array
+    /**
+     * Where an account lands on the balance sheet or the income statement.
+     *
+     * This one stays in code because the books group by it: `Books` knows that
+     * 'Other income' belongs below the operating result, and a section it has
+     * never heard of would have nowhere to go.
+     */
+    /** The reference lists a company may edit, named in `Models\Lookup`. */
+    private static function lookupLists(): array
     {
-        return array_combine($values, $values);
+        return Lookup::lists();
+    }
+
+    private static function statementSections(): array
+    {
+        $sections = ['Cash and bank', 'Accounts receivable', 'Other current assets', 'Fixed assets', 'Accounts payable', 'Other current liabilities', 'Long term liabilities', 'Equity', 'Income', 'Cost of sales', 'Operating expenses', 'Other income', 'Other expenses'];
+
+        return array_combine($sections, $sections);
     }
 
     private static function failureReasons(): array

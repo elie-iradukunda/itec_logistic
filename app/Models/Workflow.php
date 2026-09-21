@@ -24,7 +24,9 @@ final class Workflow
         'requests' => [
             'approve' => ['from' => ['pending'], 'to' => 'approved'],
             'reject' => ['from' => ['pending', 'approved'], 'to' => 'rejected', 'needs_reason' => true],
-            'assign' => ['from' => ['approved'], 'to' => 'assigned'],
+            // No "assign" transition: a request becomes assigned because a trip
+            // was created for it, not because somebody pressed a button and then
+            // walked away from the form.
         ],
         'trips' => [
             'dispatch' => ['from' => ['requested', 'approved', 'loading'], 'to' => 'in_transit'],
@@ -252,8 +254,6 @@ final class Workflow
         return match (true) {
             $module === 'requests' && $action === 'approve' => self::approveRequest($db, $id, $code, $actor),
             $module === 'requests' && $action === 'reject' => self::rejectRequest($db, $id, $code, $actor, $reason),
-            $module === 'requests' && $action === 'assign' => sprintf('Request %s is marked as assigned.', $code),
-
             $module === 'trips' && $action === 'dispatch' => self::dispatchTrip($db, $record, $code),
             $module === 'trips' && $action === 'complete' => self::completeTrip($db, $record, $code),
             $module === 'trips' && $action === 'reject' => self::cancelTrip($db, $record, $code, $reason),
@@ -311,7 +311,7 @@ final class Workflow
         $db->prepare("UPDATE deliveries SET status = 'in_transit' WHERE trip_id = ? AND deleted_at IS NULL AND status = 'loading'")->execute([$id]);
 
         if (!empty($trip['request_id'])) {
-            $db->prepare("UPDATE transport_requests SET status = 'assigned', trip_id = ? WHERE id = ? AND status = 'approved'")->execute([$id, (int) $trip['request_id']]);
+            $db->prepare("UPDATE transport_requests SET status = 'assigned', trip_id = ? WHERE id = ? AND status IN ('approved', 'assigned')")->execute([$id, (int) $trip['request_id']]);
         }
 
         $driverUser = $db->prepare('SELECT user_id FROM drivers WHERE id = ?');

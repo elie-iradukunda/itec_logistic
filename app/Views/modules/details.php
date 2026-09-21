@@ -131,7 +131,23 @@ if (!empty($record['rejection_reason'])) {
     </div>
   </div>
 
-  <?php if ($actions !== [] && can_approve($moduleKey)): ?>
+  <?php
+  /**
+   * Links are not status changes: they carry this record into another form.
+   * They are shown beside the workflow buttons because that is where someone
+   * looks for "what happens next", but pressing one changes nothing by itself.
+   */
+  $links = array_values(array_filter($module['links'], static function (array $link) use ($record): bool {
+      foreach ($link['when'] ?? [] as $field => $allowed) {
+          if (!in_array((string) ($record[$field] ?? ''), $allowed, true)) {
+              return false;
+          }
+      }
+      return role_can($link['permission'] ?? '', $link['ability'] ?? 'view');
+  }));
+  ?>
+
+  <?php if (($actions !== [] && can_approve($moduleKey)) || $links !== []): ?>
     <div class="card shadow-sm lms-action-bar">
       <div class="card-body">
         <div class="lms-action-bar-inner">
@@ -140,6 +156,15 @@ if (!empty($record['rejection_reason'])) {
             <p class="small text-muted mb-0">These buttons also update everything connected to this record.</p>
           </div>
           <div class="lms-action-buttons">
+            <?php foreach ($links as $link): ?>
+              <?php $query = []; ?>
+              <?php foreach ($link['carry'] ?? [] as $param => $column) { $query[$param] = $record[$column] ?? null; } ?>
+              <a class="btn btn-<?= e($link['tone'] ?? 'secondary') ?>" href="<?= url($link['route'], $query) ?>" title="<?= e($link['hint'] ?? '') ?>">
+                <?php if (!empty($link['icon'])): ?><i class="fe fe-<?= e($link['icon']) ?> fe-12 mr-1"></i><?php endif; ?><?= e($link['label']) ?>
+              </a>
+            <?php endforeach; ?>
+
+            <?php if (!can_approve($moduleKey)) { $actions = []; } ?>
             <?php foreach ($actions as $actionKey => $rule): ?>
               <?php
               $spec = $module['actions'][$actionKey] ?? [];
@@ -298,7 +323,15 @@ if (!empty($record['rejection_reason'])) {
                 <p class="small text-muted mt-2 mb-0">Empty rows are ignored. Clearing a row and saving removes it.</p>
               </form>
             <?php elseif ($lines === []): ?>
-              <p class="text-muted mb-0">No lines recorded.</p>
+              <?php // Read-only and empty. Say which of the two it is, or the reader
+                    // is left wondering where the form went. ?>
+              <p class="text-muted mb-0">
+                Nothing recorded yet.
+                <?= e(role_label()) ?> may read this record but not change it, so there is
+                no form here. Ask someone who can edit <?= e(strtolower($module['title'])) ?>,
+                or have an administrator grant your role the <strong>edit</strong> right
+                on <?= e($module['title']) ?> under Role permissions.
+              </p>
             <?php else: ?>
               <div class="table-responsive"><table class="table table-sm">
                 <thead><tr><?php foreach ($lineSpec['columns'] as $spec): ?><th><?= e($spec['label']) ?></th><?php endforeach; ?></tr></thead>

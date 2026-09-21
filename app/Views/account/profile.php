@@ -40,6 +40,21 @@
                 <input class="form-control" type="email" id="email_readonly" value="<?= e($user['email']) ?>" readonly disabled>
                 <small class="form-text text-muted">Ask an administrator to change your login email.</small>
               </div>
+              <div class="col-md-12 form-group lms-field">
+                <label>Email notifications</label>
+                <div class="custom-control custom-switch mt-1">
+                  <input type="hidden" name="notify_by_email" value="0">
+                  <input type="checkbox" class="custom-control-input" id="notify_by_email" name="notify_by_email" value="1"
+                         <?= (int) ($user['notify_by_email'] ?? 1) === 1 ? 'checked' : '' ?>>
+                  <label class="custom-control-label" for="notify_by_email">
+                    Send me an email as well as the on-screen bell
+                  </label>
+                </div>
+                <small class="form-text text-muted">
+                  Turn this off and you still get every update on the bell; only the email stops.
+                  Password resets are always sent, because you cannot sign in to read the bell.
+                </small>
+              </div>
             </div>
           </div>
         </section>

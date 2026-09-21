@@ -103,12 +103,29 @@ foreach ($files as $file) {
     }
 }
 
+// A plain migration sets a company up to start working: the roles, the logins,
+// the chart of accounts and the reference lists. It puts no vehicles, trips or
+// stock in the way, because those are the company's to enter.
+//
+// `--demo` adds a worked example on top, for looking around. The test suites
+// ask for the same thing through LOGISTICS_SEED_DEMO=1.
+$withDemo = in_array('--demo', $argv ?? [], true) || getenv('LOGISTICS_SEED_DEMO') === '1';
+
 $seedFiles = [
     __DIR__ . '/../database/seed.sql',
-    __DIR__ . '/../database/seed_company_scenario.sql',
-    __DIR__ . '/../database/seed_extended.sql',
     __DIR__ . '/../database/seed_accounting.sql',
 ];
+
+if ($withDemo) {
+    array_push(
+        $seedFiles,
+        __DIR__ . '/../database/seed_demo_base.sql',
+        __DIR__ . '/../database/seed_company_scenario.sql',
+        __DIR__ . '/../database/seed_extended.sql',
+        __DIR__ . '/../database/seed_accounting_demo.sql',
+        __DIR__ . '/../database/seed_demo.sql',
+    );
+}
 
 foreach ($seedFiles as $seedPath) {
     $relativePath = 'database/' . basename($seedPath);
@@ -117,16 +134,6 @@ foreach ($seedFiles as $seedPath) {
         echo "Loaded {$relativePath}\n";
     } catch (Throwable $exception) {
         fwrite(STDERR, "Failed {$relativePath}: {$exception->getMessage()}\n");
-        exit(1);
-    }
-}
-
-if (in_array('--demo', $argv ?? [], true)) {
-    try {
-        $root->exec($prepareSql(__DIR__ . '/../database/seed_demo.sql', $db['name']));
-        echo "Loaded database/seed_demo.sql\n";
-    } catch (Throwable $exception) {
-        fwrite(STDERR, "Failed demo seed: {$exception->getMessage()}\n");
         exit(1);
     }
 }
@@ -140,6 +147,11 @@ try {
     if (!function_exists('config')) {
         require_once __DIR__ . '/../bootstrap.php';
     }
+
+    // The drop-down choices a company starts with. They are ordinary rows from
+    // here on: the Reference lists page adds, renames and retires them.
+    $added = Models\Lookup::seed();
+    echo $added === 0 ? "Reference lists already in place.\n" : "Seeded {$added} reference list entries.\n";
 
     $posted = Models\Posting::syncAll();
     $total = array_sum($posted);

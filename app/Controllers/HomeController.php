@@ -10,13 +10,21 @@ use Models\AuditLog;
 use Models\Notifier;
 use Models\Permission;
 use Models\UserRepository;
+use Support\Mailer;
 
 final class HomeController
 {
     public function index(): void
     {
+        // The root is the sign-in form, so there is nothing here for someone who
+        // is already signed in.
+        if (\is_logged_in()) {
+            header('Location: ' . \url('dashboard'));
+            exit;
+        }
+
         \view('home/index', [
-            'title' => 'Logistics made visible',
+            'title' => 'Sign in',
             'accounts' => \demo_accounts(),
             'loginError' => (string) ($_GET['login_error'] ?? ''),
             'loginRequired' => ($_GET['login_required'] ?? '') === '1',
@@ -101,18 +109,21 @@ final class HomeController
     }
 
     /**
-     * Starts a password reset. The token is shown on screen because this install
-     * has no mail transport configured; wire it to email before production use.
+     * Starts a password reset.
+     *
+     * The link is emailed to the address on the account. It is only printed on
+     * screen when the email could not go out, so an installation with no mail
+     * configured is still usable but never leaks the link when mail works.
      */
     public function forgotPassword(): void
     {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
-            \view('auth/forgot', ['title' => 'Reset your password', 'token' => null, 'sent' => false]);
+            \view('auth/forgot', ['title' => 'Reset your password', 'token' => null, 'emailed' => false, 'sent' => false]);
             return;
         }
 
         if (!Csrf::check()) {
-            \view('auth/forgot', ['title' => 'Reset your password', 'token' => null, 'sent' => false, 'error' => 'Your security token expired. Please try again.']);
+            \view('auth/forgot', ['title' => 'Reset your password', 'token' => null, 'emailed' => false, 'sent' => false, 'error' => 'Your security token expired. Please try again.']);
             return;
         }
 
@@ -121,15 +132,40 @@ final class HomeController
         $user = $repository->findActiveByEmail($email);
 
         $token = null;
+        $emailed = false;
+
         if ($user !== null) {
             $token = $repository->createResetToken((int) $user['id']);
             AuditLog::record('auth.reset_requested', 'user', (string) $user['id'], null, ['email' => $email]);
+
+            $link = Mailer::link('reset-password/' . $token);
+            $result = Mailer::send([
+                'key' => 'reset-' . substr(hash('sha256', $token), 0, 40),
+                'category' => 'password_reset',
+                'to' => (string) $user['email'],
+                'to_name' => (string) $user['full_name'],
+                'user_id' => (int) $user['id'],
+                'subject' => 'Reset your LMS password',
+                'heading' => 'Reset your password',
+                'lines' => [
+                    sprintf('Hello %s,', (string) $user['full_name']),
+                    'Someone asked to reset the password on your LMS account. Use the button below to choose a new one.',
+                    'The link works once and expires in one hour. If you did not ask for this, ignore this message and your password stays as it is.',
+                ],
+                'action' => ['label' => 'Choose a new password', 'url' => $link],
+                'entity_type' => 'users',
+                'entity_id' => (string) $user['id'],
+            ]);
+            $emailed = $result['sent'];
         }
 
-        // The same answer either way, so the form cannot be used to discover accounts.
+        // The same answer either way, so the form cannot be used to discover
+        // accounts. The link is only printed on screen when it could not be
+        // emailed, which is what a machine with no mail configured needs.
         \view('auth/forgot', [
             'title' => 'Reset your password',
-            'token' => $token,
+            'token' => $emailed ? null : $token,
+            'emailed' => $emailed,
             'sent' => true,
             'email' => $email,
         ]);

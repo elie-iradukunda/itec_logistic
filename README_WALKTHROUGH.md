@@ -358,7 +358,8 @@ No Commercial, no Warehouse, no Administration.
 - **Do:** open Vehicles → **RAE 145C**.
 - **Expect:** its status changed by itself from Available to **Maintenance**, because a
   work order went in progress. Nobody typed that.
-- **Do:** back on the work order, fill **Parts and labour**:
+- **Do:** back on the work order's record page, scroll to the card headed
+  **Parts and labour** and fill three rows:
 
   | Type | Description | Part number | Qty | Unit cost |
   | --- | --- | --- | --- | --- |
@@ -426,6 +427,12 @@ Sign out, sign in as **nadine@itec.rw** / `password`.
 
 ## 3.3 Buy them — a purchase request with real lines
 
+> **Where line editors live.** Trip stops, purchase lines, maintenance parts and
+> invoice lines are all edited on the record's **own page**, below its field sections —
+> never on the Edit form. A line belongs to a record that already exists, so it needs
+> something to hang from: create the record first, then add its lines. The Edit form
+> says so in its right-hand panel.
+
 - **Do:** Warehouse → **Procurement** → **New purchase request**:
 
   | Field | Value |
@@ -441,7 +448,8 @@ Sign out, sign in as **nadine@itec.rw** / `password`.
   | Status | `Draft` |
 
 - **Expect:** created as **PR-2026-0001**.
-- **Do:** in **Requested items**, fill the first row only: Item `Euro pallet 1200x800`,
+- **Do:** on the record page that just opened, scroll to the card headed
+  **Requested items** and fill the first row only: Item `Euro pallet 1200x800`,
   Qty `120`, Unit `Unit`, Unit price `12500`, Stock item `Euro pallet 1200x800`.
   Click **Save requested items**.
 - **Expect:** *"Requested items saved."* and the **Amount** on the record has changed by
@@ -692,7 +700,17 @@ Still signed in as **aline@itec.rw**.
 
 ## 5.3 The route, stop by stop
 
-- **Do:** on the trip, fill **Stops on this route**:
+**Where this is.** Stops are edited on the trip's **record page**, not on the Edit
+form. If you are still on the form, save it first.
+
+- **Do:** open Transport → **Trips** and click **TRP-2026-0001** itself (the blue
+  reference, not the pencil icon). Scroll down past the field sections — Trip, Route,
+  Plan, Resources, Actual execution, Notes — until you reach the card headed
+  **Stops on this route**. It sits just above **Shipments on board**.
+- **Expect:** a small table with the columns Type, Location, Contact, Phone, Planned
+  arrival and Status, three empty rows, an **Add row** button underneath, and a blue
+  **Save stops on this route** button beside it.
+- **Do:** fill three rows:
 
   | # | Type | Location | Contact | Phone | Planned arrival |
   | --- | --- | --- | --- | --- | --- |
@@ -941,7 +959,8 @@ Sign out, sign in as **emmanuel@itec.rw** / `password`.
   and marked *calculated* — you cannot type them.
 - **Do:** click **Issue invoice** straight away.
 - **Expect:** refused — *"Add at least one invoice line before issuing this invoice."*
-- **Do:** fill **Invoice lines**:
+- **Do:** on the invoice record page, scroll to the card headed **Invoice lines** and
+  fill two rows:
 
   | Description | Qty | Unit price |
   | --- | --- | --- |

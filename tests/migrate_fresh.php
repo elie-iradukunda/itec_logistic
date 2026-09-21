@@ -27,6 +27,14 @@ $cleanup = new PDO($rootDsn, $db['user'], $db['pass'], $options);
 $cleanup->exec("DROP DATABASE IF EXISTS `{$dbName}`");
 $pdo = null;
 
+// exit() skips `finally`, so the drop is registered where it always runs.
+register_shutdown_function(static function () use ($cleanup, $dbName): void {
+    try {
+        $cleanup->exec("DROP DATABASE IF EXISTS `{$dbName}`");
+    } catch (Throwable) {
+    }
+});
+
 try {
     ob_start();
     require __DIR__ . '/../scripts/migrate.php';

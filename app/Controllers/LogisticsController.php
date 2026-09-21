@@ -61,15 +61,42 @@ final class LogisticsController
 
         Flash::success(sprintf('%s created.', $module['singular']));
 
-        // A new account gets a one-time password, shown once so the administrator
-        // can pass it on. It is never stored or displayed again.
+        // A new account gets a one-time password. It is emailed to the person
+        // directly; the administrator only sees it when the email could not go,
+        // so it is not read out loud unless it has to be.
         $oneTime = LogisticsData::takeOneTimePassword();
         if ($oneTime !== null) {
-            Flash::warning(sprintf(
-                'One-time password for %s: %s — give it to them directly. They must change it at first sign-in, and it will not be shown again.',
-                $input['email'] ?? 'the new account',
-                $oneTime
-            ));
+            $address = trim((string) ($input['email'] ?? ''));
+            $name = trim((string) ($input['full_name'] ?? $address));
+
+            $result = \Support\Mailer::send([
+                'key' => 'welcome-' . $id,
+                'category' => 'new_account',
+                'to' => $address,
+                'to_name' => $name,
+                'user_id' => $id,
+                'subject' => 'Your LMS account is ready',
+                'heading' => 'Welcome to ' . \company_name(),
+                'lines' => [
+                    sprintf('Hello %s,', $name),
+                    'An account has been created for you on the LMS logistics system. Sign in with the details below.',
+                    'You will be asked to choose your own password the first time you sign in, and this one stops working straight away.',
+                ],
+                'facts' => ['Sign in with' => $address, 'One-time password' => $oneTime],
+                'action' => ['label' => 'Sign in to LMS', 'url' => \Support\Mailer::link('')],
+                'entity_type' => 'users',
+                'entity_id' => (string) $id,
+            ]);
+
+            if ($result['sent']) {
+                Flash::info(sprintf('A one-time password was emailed to %s. They must change it at first sign-in.', $address));
+            } else {
+                Flash::warning(sprintf(
+                    'One-time password for %s: %s — the email could not be sent, so give it to them directly. They must change it at first sign-in, and it will not be shown again.',
+                    $address === '' ? 'the new account' : $address,
+                    $oneTime
+                ));
+            }
         }
 
         $this->redirect(\url([$key, $id]));
@@ -261,7 +288,10 @@ final class LogisticsController
         \view('modules/form', [
             'title' => $id === null ? $module['button'] : 'Edit ' . $module['singular'],
             'moduleKey' => $key,
-            'module' => $module,
+            // Fields that belong to another role are shown, so the driver can
+            // read the address he is delivering to, but locked, so he cannot
+            // change what he was asked to do.
+            'module' => Schema::forRole($key, \current_role()),
             'record' => $record,
             'recordId' => $id,
             'errors' => $errors,
@@ -274,6 +304,41 @@ final class LogisticsController
     {
         $today = date('Y-m-d');
         $now = date('Y-m-d H:i:s');
+
+        // "Plan trip" on an approved request opens this form carrying the
+        // request with it, so the route and the customer are not retyped.
+        if ($key === 'trips' && ($_GET['request_id'] ?? '') !== '') {
+            $request = LogisticsData::find('requests', (int) $_GET['request_id'], \current_context());
+            if ($request !== null && in_array((string) $request['status'], ['approved', 'assigned'], true)) {
+                return [
+                    'status' => 'requested',
+                    'trip_type' => 'delivery',
+                    'request_id' => $request['id'],
+                    'customer_id' => $request['customer_id'],
+                    'pickup_location' => $request['pickup_location'],
+                    'destination' => $request['destination'],
+                    'cargo_summary' => $request['cargo_description'],
+                    'planned_arrival_at' => $request['required_date'] ? $request['required_date'] . ' 12:00:00' : null,
+                ];
+            }
+        }
+
+        // "Record delivery" from a trip page opens this form already pointing at
+        // that trip — and at the state the trip is actually in, so a delivery
+        // added to a truck that has already left is not filed as still loading.
+        if ($key === 'deliveries' && ($_GET['trip_id'] ?? '') !== '') {
+            $trip = LogisticsData::find('trips', (int) $_GET['trip_id'], \current_context());
+            if ($trip !== null && !in_array((string) $trip['status'], ['delivered', 'cancelled'], true)) {
+                return [
+                    'trip_id' => $trip['id'],
+                    'destination' => $trip['destination'],
+                    'planned_at' => $trip['planned_arrival_at'],
+                    'status' => (string) $trip['status'] === 'in_transit' ? 'in_transit' : 'loading',
+                    'attempt_number' => 1,
+                    'failure_reason' => 'none',
+                ];
+            }
+        }
 
         $defaults = match ($key) {
             'vehicles' => ['status' => 'available', 'fuel_type' => 'diesel', 'ownership' => 'owned', 'mileage' => 0],
@@ -293,8 +358,12 @@ final class LogisticsController
             'movements' => ['movement_type' => 'stock_in', 'moved_at' => $now, 'reference_type' => 'adjustment'],
             'procurement' => ['status' => 'draft', 'requested_by' => \current_user_id()],
             'suppliers' => ['status' => 'active', 'payment_terms_days' => 30],
+            'payments' => ['method' => 'bank_transfer', 'paid_at' => $today, 'recorded_by' => \current_user_id()],
             'users' => ['status' => 'active', 'prvg' => 2, 'must_change_password' => 1],
             'reports' => ['format_label' => 'CSV', 'period_label' => 'Monthly', 'owner_name' => \current_user_name(), 'action_label' => 'View'],
+            // Nobody adds a choice to a list in order to withhold it.
+            'lookups' => ['is_active' => 1],
+            'warehouses' => ['status' => 'active'],
             default => [],
         };
 

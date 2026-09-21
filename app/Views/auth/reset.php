@@ -9,9 +9,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/feather.css">
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/app-light.css">
-  <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics.css">
-  <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics-modules.css">
-  <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics-background.css">
+  <link rel="stylesheet" href="<?= asset('assets/css/logistics.css') ?>">
+  <link rel="stylesheet" href="<?= asset('assets/css/logistics-modules.css') ?>">
+  <link rel="stylesheet" href="<?= asset('assets/css/logistics-background.css') ?>">
 </head>
 <body class="lms-auth-page">
   <main class="lms-auth-card">

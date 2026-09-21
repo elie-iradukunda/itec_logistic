@@ -245,7 +245,7 @@ final class LogisticsData
         $module = Schema::get($key);
         $errors = [];
 
-        foreach (Schema::editableFields($key) as $name => $field) {
+        foreach (Schema::editableFields($key, \current_role()) as $name => $field) {
             $value = trim((string) ($input[$name] ?? ''));
             $label = $field['label'];
 
@@ -528,7 +528,14 @@ final class LogisticsData
         $module = Schema::get($key);
         $columns = [];
 
-        foreach (Schema::editableFields($key) as $name => $field) {
+        // Renaming a reference-list entry has to follow the records that carry
+        // the old name, which means knowing what it was. Only the modules that
+        // ask for it pay for the extra read.
+        $before = $id !== null && !empty($module['track_changes'])
+            ? self::rowBefore($module['table'], $id)
+            : [];
+
+        foreach (Schema::editableFields($key, \current_role()) as $name => $field) {
             if ($field['type'] === 'file') {
                 $uploaded = self::storeUpload($key, $name, $files, (string) ($input['existing_' . $name] ?? ''));
                 $columns[$name] = $uploaded === '' ? null : $uploaded;
@@ -580,7 +587,7 @@ final class LogisticsData
                 $statement->execute([...array_values($columns), $id]);
             }
 
-            self::afterSave($key, $id, $columns);
+            self::afterSave($key, $id, $columns, $before);
 
             if ($owning) {
                 $db->commit();
@@ -677,12 +684,46 @@ final class LogisticsData
             $columns['previous_mileage'] = self::lastOdometer((int) $columns['vehicle_id'], $id);
         }
 
+        // A driver's own list is filtered by driver_id, so a fill-up he records
+        // against nobody would disappear from it the moment he saved it. The
+        // office may still file fuel on someone else's behalf.
+        if ($key === 'fuel' && \current_role() === 'driver' && \current_driver_id() !== null) {
+            $columns['driver_id'] = \current_driver_id();
+        }
+
         if ($key === 'invoices') {
             $columns['tax_rate'] ??= Settings::float('tax_rate', 18.0);
         }
 
         if ($key === 'warehouse' && $id === null) {
             $columns['status'] = self::stockStatus((float) ($columns['quantity'] ?? 0), (float) ($columns['minimum_level'] ?? 0));
+        }
+
+        // Who raised a request, filed a claim or took a payment is a fact about
+        // the session, not a choice on a form. It is stamped once, at creation,
+        // and an edit never moves it onto somebody else.
+        $actor = match ($key) {
+            'requests' => 'requester_id',
+            'expenses' => 'submitted_by',
+            'payments' => 'recorded_by',
+            default => null,
+        };
+        if ($actor !== null) {
+            if ($id === null && \current_user_id() !== null) {
+                $columns[$actor] = \current_user_id();
+            } else {
+                unset($columns[$actor]);
+            }
+        }
+
+        if ($key === 'lookups') {
+            // "Shown as" is the exception, not the rule: almost every entry
+            // reads on the form exactly as it is stored.
+            $columns['label'] = trim((string) ($columns['label'] ?? '')) !== '' ? $columns['label'] : $columns['value'];
+            // A blank position puts the entry at the end of its list.
+            if (($columns['sort_order'] ?? null) === null) {
+                $columns['sort_order'] = self::nextLookupPosition((string) ($columns['list_key'] ?? ''));
+            }
         }
 
         if ($key === 'users' && \current_prvg() !== 1) {
@@ -703,6 +744,13 @@ final class LogisticsData
         return $columns;
     }
 
+    private static function nextLookupPosition(string $listKey): int
+    {
+        $last = self::scalar('SELECT MAX(sort_order) FROM lookup_values WHERE list_key = ?', [$listKey]);
+
+        return $last === null || $last === false ? 10 : (int) $last + 10;
+    }
+
     /** Set when a user record is created, so the controller can show it once. */
     private static ?string $lastOneTimePassword = null;
 
@@ -714,26 +762,76 @@ final class LogisticsData
         return $password;
     }
 
-    /** Readable but not guessable: two words, a separator and four digits. */
+    /**
+     * A one-time password that reads as what it is: LMS-7K4M-2QX9.
+     *
+     * It used to be two words and four digits ("KarongiDepot6877"), which looked
+     * like a password somebody had chosen rather than one the system issued for a
+     * single sign-in. The prefix says where it came from, and the grouping makes
+     * it easy to read down a phone line.
+     *
+     * The alphabet leaves out 0/O and 1/I, the pairs people mistype, and 8 places
+     * from 32 characters is 40 bits — far more than a password that must be
+     * replaced at first sign-in needs.
+     */
     private static function oneTimePassword(): string
     {
-        $words = ['Kigali', 'Huye', 'Musanze', 'Rubavu', 'Nyagatare', 'Muhanga', 'Karongi', 'Rwamagana'];
-        $second = ['Fresh', 'Route', 'Cargo', 'Depot', 'Fleet', 'Transit', 'Convoy', 'Pallet'];
+        $alphabet = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+        $block = static function () use ($alphabet): string {
+            $out = '';
+            for ($i = 0; $i < 4; $i++) {
+                $out .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+            }
+            return $out;
+        };
 
-        return $words[random_int(0, count($words) - 1)]
-            . $second[random_int(0, count($second) - 1)]
-            . random_int(1000, 9999);
+        return 'LMS-' . $block() . '-' . $block();
     }
 
     /** Side effects that keep other tables in step with this one. */
-    private static function afterSave(string $key, int $id, array $columns): void
+    private static function afterSave(string $key, int $id, array $columns, array $before = []): void
     {
         $db = self::db();
+
+        if ($key === 'lookups') {
+            $old = (string) ($before['value'] ?? '');
+            $new = (string) ($columns['value'] ?? '');
+            if ($old !== '' && $old !== $new) {
+                // The expenses already filed under "Allowance" move with it when
+                // it becomes "Driver allowance", rather than falling out of the list.
+                Lookup::rename((string) $columns['list_key'], $old, $new);
+            }
+            Lookup::flush();
+        }
 
         if ($key === 'vehicles' && !empty($columns['assigned_driver_id'])) {
             // A driver holds one vehicle at a time.
             $release = $db->prepare('UPDATE vehicles SET assigned_driver_id = NULL WHERE assigned_driver_id = ? AND id <> ?');
             $release->execute([(int) $columns['assigned_driver_id'], $id]);
+        }
+
+        if ($key === 'trips') {
+            // The request is answered the moment a trip exists for it. Moving the
+            // trip onto a different request releases the one it left behind, so a
+            // request is never held by a trip that no longer names it.
+            $previous = (int) ($before['request_id'] ?? 0);
+            $current = (int) ($columns['request_id'] ?? 0);
+
+            if ($previous > 0 && $previous !== $current) {
+                $db->prepare("UPDATE transport_requests SET status = 'approved', trip_id = NULL WHERE id = ? AND trip_id = ?")
+                   ->execute([$previous, $id]);
+            }
+
+            if ($current > 0) {
+                $db->prepare("UPDATE transport_requests SET status = 'assigned', trip_id = ? WHERE id = ? AND status IN ('approved', 'assigned')")
+                   ->execute([$id, $current]);
+            }
+
+            // Swapping the vehicle or the driver on a trip that is already out
+            // has to hand the old one back. Otherwise the truck that returned to
+            // the yard still reads "On trip" and nothing will dispatch it again.
+            self::handOverResource($db, $id, 'vehicles', (int) ($before['vehicle_id'] ?? 0), (int) ($columns['vehicle_id'] ?? 0), (string) ($columns['status'] ?? ''));
+            self::handOverResource($db, $id, 'drivers', (int) ($before['driver_id'] ?? 0), (int) ($columns['driver_id'] ?? 0), (string) ($columns['status'] ?? ''));
         }
 
         if ($key === 'fuel' && !empty($columns['vehicle_id']) && !empty($columns['mileage'])) {
@@ -899,6 +997,21 @@ final class LogisticsData
 
         $code = self::code($key, $record);
 
+        if ($key === 'lookups') {
+            // Deleting a choice that records still carry would leave those
+            // records showing a value no drop-down offers. Retiring it keeps
+            // them readable and stops anyone picking it again.
+            $inUse = Lookup::usageCount((string) $record['list_key'], (string) $record['value']);
+            if ($inUse > 0) {
+                throw new \RuntimeException(sprintf(
+                    '"%s" is still used by %d record%s. Switch "Offer this choice" off instead — the choice disappears from new forms while those records keep reading correctly.',
+                    $record['value'],
+                    $inUse,
+                    $inUse === 1 ? '' : 's'
+                ));
+            }
+        }
+
         if (empty($module['soft_delete'])) {
             $itemId = $key === 'movements' ? (int) $record['item_id'] : null;
             self::db()->prepare("DELETE FROM {$module['table']} WHERE id = ?")->execute([$id]);
@@ -915,6 +1028,10 @@ final class LogisticsData
             if ($key === 'payments' && !empty($record['invoice_id'])) {
                 self::recalculateInvoice((int) $record['invoice_id']);
             }
+        }
+
+        if ($key === 'lookups') {
+            Lookup::flush();
         }
 
         AuditLog::record('record.deleted', $key, $code, $reason);
@@ -1119,7 +1236,8 @@ final class LogisticsData
         return (int) self::scalar("SELECT COUNT(*) FROM {$relation['table']} WHERE id = ?", [(int) $id]) > 0;
     }
 
-    private static function relationLabel(array $field, mixed $id): string
+    /** The name behind a relation id, for the places that show one without offering a choice. */
+    public static function relationLabel(array $field, mixed $id): string
     {
         if ($id === null || $id === '') {
             return '';
@@ -1156,6 +1274,49 @@ final class LogisticsData
             $quantity <= $minimum => 'reorder',
             default => 'in_stock',
         };
+    }
+
+    /**
+     * Move "on trip" from the vehicle or driver a trip has left to the one it
+     * has taken, but only while the trip is actually out.
+     *
+     * The one it left is released only when no other running trip still holds
+     * it, so reassigning a truck between two live trips never frees it by
+     * mistake.
+     */
+    private static function handOverResource(PDO $db, int $tripId, string $table, int $previous, int $current, string $status): void
+    {
+        if ($previous === $current) {
+            return;
+        }
+
+        $running = in_array($status, ['loading', 'in_transit'], true);
+        $column = $table === 'vehicles' ? 'vehicle_id' : 'driver_id';
+
+        if ($previous > 0) {
+            $held = $db->prepare(
+                "SELECT COUNT(*) FROM trips
+                  WHERE {$column} = ? AND id <> ? AND deleted_at IS NULL
+                    AND status IN ('loading', 'in_transit')"
+            );
+            $held->execute([$previous, $tripId]);
+            if ((int) $held->fetchColumn() === 0) {
+                $db->prepare("UPDATE {$table} SET status = 'available' WHERE id = ? AND status = 'on_trip'")->execute([$previous]);
+            }
+        }
+
+        if ($running && $current > 0) {
+            $db->prepare("UPDATE {$table} SET status = 'on_trip' WHERE id = ? AND status = 'available'")->execute([$current]);
+        }
+    }
+
+    /** The row exactly as it stands before an update, for modules that compare against it. */
+    private static function rowBefore(string $table, int $id): array
+    {
+        $statement = self::db()->prepare("SELECT * FROM {$table} WHERE id = ?");
+        $statement->execute([$id]);
+
+        return $statement->fetch(PDO::FETCH_ASSOC) ?: [];
     }
 
     private static function scalar(string $sql, array $parameters = []): mixed

@@ -219,6 +219,22 @@ function url(string|array $path = '', array $query = []): string
     return $query === [] ? $url : $url . '?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
 }
 
+/**
+ * A URL for one of our own assets, stamped with the file's last-changed time.
+ *
+ * Browsers cache a stylesheet by its URL, so an edit to logistics-modules.css
+ * would sit unseen behind the copy already held. The timestamp changes with the
+ * file, which makes it a new URL, which makes the browser fetch it.
+ */
+function asset(string $path): string
+{
+    $path = ltrim($path, '/');
+    $file = __DIR__ . '/public/' . $path;
+    $url = rtrim((string) config('app.base_url', ''), '/') . '/' . $path;
+
+    return is_file($file) ? $url . '?v=' . filemtime($file) : $url;
+}
+
 function e(mixed $value): string
 {
     return htmlspecialchars((string) $value, ENT_QUOTES, 'UTF-8');
@@ -313,7 +329,7 @@ function navigation(): array
             ['fuel', 'Fuel management'], ['expenses', 'Logistics expenses'],
         ]],
         ['label' => 'Warehouse', 'icon' => 'package', 'id' => 'warehouseMenu', 'items' => [
-            ['warehouse', 'Inventory'], ['movements', 'Stock movements'], ['procurement', 'Procurement'], ['suppliers', 'Suppliers'],
+            ['warehouses', 'Warehouses'], ['warehouse', 'Inventory'], ['movements', 'Stock movements'], ['procurement', 'Procurement'], ['suppliers', 'Suppliers'],
         ]],
         ['label' => 'Accounting', 'icon' => 'book', 'id' => 'accountingMenu', 'items' => [
             ['books', 'Accounting books'], ['journal', 'Journal'], ['accounts', 'Chart of accounts'],

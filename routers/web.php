@@ -10,6 +10,7 @@ use Controllers\FileController;
 use Controllers\HomeController;
 use Controllers\JournalController;
 use Controllers\LogisticsController;
+use Controllers\MailController;
 use Controllers\NotificationController;
 use Controllers\PermissionController;
 use Controllers\ReportController;
@@ -69,6 +70,12 @@ $router->get('/settings', [SettingsController::class, 'index'], ['permission' =>
 $router->post('/settings', [SettingsController::class, 'update'], ['permission' => 'settings', 'ability' => 'edit']);
 $router->get('/permissions', [PermissionController::class, 'index'], ['permission' => 'users']);
 $router->post('/permissions', [PermissionController::class, 'update'], ['permission' => 'users', 'ability' => 'edit']);
+$router->get('/email', [MailController::class, 'index'], ['permission' => 'email']);
+$router->post('/email/test', [MailController::class, 'test'], ['permission' => 'email', 'ability' => 'edit']);
+$router->post('/email/flush', [MailController::class, 'flush'], ['permission' => 'email', 'ability' => 'edit']);
+$router->get('/email/{id}', [MailController::class, 'show'], ['permission' => 'email']);
+$router->get('/email/{id}/preview', [MailController::class, 'preview'], ['permission' => 'email']);
+$router->post('/email/{id}/retry', [MailController::class, 'retry'], ['permission' => 'email', 'ability' => 'edit']);
 $router->get('/audit', [AuditController::class, 'index'], ['permission' => 'audit']);
 $router->get('/audit/export', [AuditController::class, 'export'], ['permission' => 'audit']);
 
@@ -80,8 +87,8 @@ $modules = [
     'requests', 'trips', 'shipments', 'deliveries',
     'customers', 'rates', 'invoices', 'payments',
     'fuel', 'expenses',
-    'warehouse', 'movements', 'procurement', 'suppliers',
-    'users', 'accounts',
+    'warehouses', 'warehouse', 'movements', 'procurement', 'suppliers',
+    'users', 'accounts', 'lookups',
 ];
 
 foreach ($modules as $module) {

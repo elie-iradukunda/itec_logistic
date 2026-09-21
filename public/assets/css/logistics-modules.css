@@ -2,8 +2,23 @@
    Module pages: list, form and record detail.
    One set of tokens so a page reads the same in light and dark mode.
    ========================================================================== */
-:root{--lms-line:#e6ebf0;--lms-muted:#7a858f;--lms-ink:#22303c;--lms-surface:#fff;--lms-soft:#f6f8fa;--lms-accent:#5e72e4}
-body.dark{--lms-line:#3a4149;--lms-muted:#9aa4ad;--lms-ink:#e7ecf0;--lms-surface:#2b3035;--lms-soft:#31373d;--lms-accent:#f0b565}
+/* Secondary text carries the explanations — what a page is for, what a button
+   will do, what a column means — so it has to be read, not just glimpsed. The
+   old #7a858f sat at 4.0:1 on white, under the 4.5:1 AA floor; these clear it
+   at 5.6:1 and 5.3:1, and the weight below gives the small sizes some body. */
+:root{--lms-line:#e6ebf0;--lms-muted:#5b6771;--lms-ink:#22303c;--lms-surface:#fff;--lms-soft:#f6f8fa;--lms-accent:#5e72e4}
+body.dark{--lms-line:#3a4149;--lms-muted:#a8b2bb;--lms-ink:#e7ecf0;--lms-surface:#2b3035;--lms-soft:#31373d;--lms-accent:#f0b565}
+
+/* The explanatory lines under a heading, a section title or an action bar. */
+.lms-page-sub,
+.lms-section-head p,
+.lms-result-count,
+.lms-rule-list,
+.lms-book-head p,
+.lms-form-facts li,
+.lms-action-bar-inner p,
+.card-header .text-muted,
+.lms-card-hint{font-weight:500}
 
 /* --- page heading -------------------------------------------------------- */
 .lms-page-head{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;justify-content:space-between;padding:22px 0 16px}

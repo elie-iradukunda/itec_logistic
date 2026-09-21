@@ -9,9 +9,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/feather.css">
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/app-light.css">
-  <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics.css">
-  <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics-modules.css">
-  <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics-background.css">
+  <link rel="stylesheet" href="<?= asset('assets/css/logistics.css') ?>">
+  <link rel="stylesheet" href="<?= asset('assets/css/logistics-modules.css') ?>">
+  <link rel="stylesheet" href="<?= asset('assets/css/logistics-background.css') ?>">
 </head>
 <body class="lms-auth-page">
   <main class="lms-auth-card">
@@ -23,11 +23,21 @@
     <?php endif; ?>
 
     <?php if (!empty($sent)): ?>
-      <p class="text-muted">If <strong><?= e($email ?? '') ?></strong> belongs to an active account, a reset link has been created for it.</p>
+      <?php if (!empty($emailed)): ?>
+        <div class="alert alert-success">
+          <strong>Check your inbox.</strong>
+          <p class="small mb-0">If <strong><?= e($email ?? '') ?></strong> belongs to an active account, a
+          reset link is on its way to it. The link works once and expires in an hour.</p>
+        </div>
+        <p class="small text-muted">Nothing after a few minutes? Look in the spam folder, or ask an
+        administrator to check Administration &rarr; Email outbox.</p>
+      <?php else: ?>
+        <p class="text-muted">If <strong><?= e($email ?? '') ?></strong> belongs to an active account, a reset link has been created for it.</p>
+      <?php endif; ?>
       <?php if (!empty($token)): ?>
         <div class="alert alert-warning">
-          <strong>No mail transport is configured on this install.</strong>
-          <p class="small mb-2">Until email is wired up, the reset link is shown here so an administrator can pass it on. It is valid for one hour and can be used once.</p>
+          <strong>The link could not be emailed.</strong>
+          <p class="small mb-2">Email is switched off, or the provider refused the message, so the link is shown here for an administrator to pass on. It is valid for one hour and can be used once.</p>
           <code class="lms-auth-token"><?= e(url(['reset-password', $token])) ?></code>
         </div>
         <a class="btn btn-primary btn-block" href="<?= url(['reset-password', $token]) ?>">Open the reset page</a>

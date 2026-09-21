@@ -27,11 +27,21 @@ $closeGroup = static function (string $suffix): string {
   <label for="<?= e($id) ?>">
     <?= e($field['label']) ?>
     <?php if ($required): ?><span class="lms-required" title="Required">*</span><?php endif; ?>
-    <?php if ($readonly): ?><span class="badge badge-light ml-1">calculated</span><?php endif; ?>
+    <?php if ($readonly): ?><span class="badge badge-light ml-1"><?= e($field['readonly_note'] ?? 'calculated') ?></span><?php endif; ?>
   </label>
 
   <?php if ($readonly): ?>
-    <input class="form-control" type="text" id="<?= e($id) ?>" value="<?= e($value) ?>" readonly disabled>
+    <?php
+    // A locked field shows what it stands for, not what is stored: the name
+    // behind a relation id, the label behind an option key.
+    $shown = match ($field['type']) {
+        'relation' => \Models\LogisticsData::relationLabel($field, $value),
+        'select' => (string) ($field['options'][$value] ?? ($value === '' ? '' : \Models\Schema::label((string) $value))),
+        'checkbox' => (int) $value === 1 ? 'Yes' : 'No',
+        default => (string) $value,
+    };
+    ?>
+    <input class="form-control" type="text" id="<?= e($id) ?>" value="<?= e($shown) ?>" readonly disabled>
 
   <?php elseif ($field['type'] === 'file'): ?>
     <?php $current = (string) $value; ?>

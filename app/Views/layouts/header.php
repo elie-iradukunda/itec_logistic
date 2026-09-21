@@ -19,7 +19,7 @@ if (can_view('reports')) {
         $searchIndex[] = ['label' => $reportLabel, 'url' => url(['reports', 'view', $reportKey]), 'group' => 'Reports', 'keywords' => 'report'];
     }
 }
-foreach ([['users', 'Users', 'Administration'], ['permissions', 'Role permissions', 'Administration'], ['settings', 'Company settings', 'Administration'], ['audit', 'Audit trail', 'Administration']] as [$route, $label, $group]) {
+foreach ([['users', 'Users', 'Administration'], ['permissions', 'Role permissions', 'Administration'], ['lookups', 'Reference lists', 'Administration'], ['settings', 'Company settings', 'Administration'], ['audit', 'Audit trail', 'Administration'], ['email', 'Email outbox', 'Administration']] as [$route, $label, $group]) {
     if (can_view($route === 'permissions' ? 'users' : $route)) {
         $searchIndex[] = ['label' => $label, 'url' => url($route), 'group' => $group, 'keywords' => $route];
     }
@@ -43,9 +43,11 @@ $searchIndex[] = ['label' => 'My profile', 'url' => url('account'), 'group' => '
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/daterangepicker.css">
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/app-light.css" id="lightTheme">
   <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/app-dark.css" id="darkTheme" disabled>
-  <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics.css">
-  <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics-modules.css">
-  <link rel="stylesheet" href="<?= $baseUrl ?>/assets/css/logistics-background.css">
+  <?php /* Our own stylesheets change often; the version is the file's own
+           timestamp, so an edit reaches the browser without a hard refresh. */ ?>
+  <link rel="stylesheet" href="<?= asset('assets/css/logistics.css') ?>">
+  <link rel="stylesheet" href="<?= asset('assets/css/logistics-modules.css') ?>">
+  <link rel="stylesheet" href="<?= asset('assets/css/logistics-background.css') ?>">
 </head>
 <body class="vertical">
 <script>try { if (localStorage.getItem('mode') === 'dark') { document.body.classList.add('dark'); } } catch (e) {}</script>
@@ -155,13 +157,15 @@ $searchIndex[] = ['label' => 'My profile', 'url' => url('account'), 'group' => '
           </li>
         <?php endif; ?>
 
-        <?php if (can_view('users') || can_view('settings') || can_view('audit')): ?>
+        <?php if (can_view('users') || can_view('lookups') || can_view('settings') || can_view('audit') || can_view('email')): ?>
           <li class="nav-item dropdown">
-            <a href="#adminMenu" data-toggle="collapse" class="dropdown-toggle nav-link<?= nav_group(['users', 'permissions', 'settings', 'audit']) ? ' has-active' : '' ?>"><i class="fe fe-shield fe-16"></i><span class="ml-3 item-text">Administration</span></a>
-            <ul class="collapse<?= nav_group(['users', 'permissions', 'settings', 'audit']) ? ' show' : '' ?> list-unstyled pl-4 w-100" id="adminMenu">
+            <a href="#adminMenu" data-toggle="collapse" class="dropdown-toggle nav-link<?= nav_group(['users', 'permissions', 'lookups', 'settings', 'audit', 'email']) ? ' has-active' : '' ?>"><i class="fe fe-shield fe-16"></i><span class="ml-3 item-text">Administration</span></a>
+            <ul class="collapse<?= nav_group(['users', 'permissions', 'lookups', 'settings', 'audit', 'email']) ? ' show' : '' ?> list-unstyled pl-4 w-100" id="adminMenu">
               <?php if (can_view('users')): ?><li class="nav-item"><a class="nav-link pl-3<?= nav_active('users') ?>" href="<?= url('users') ?>"><span class="ml-1 item-text">Users</span></a></li><?php endif; ?>
               <?php if (can_view('users')): ?><li class="nav-item"><a class="nav-link pl-3<?= nav_active('permissions') ?>" href="<?= url('permissions') ?>"><span class="ml-1 item-text">Role permissions</span></a></li><?php endif; ?>
+              <?php if (can_view('lookups')): ?><li class="nav-item"><a class="nav-link pl-3<?= nav_active('lookups') ?>" href="<?= url('lookups') ?>"><span class="ml-1 item-text">Reference lists</span></a></li><?php endif; ?>
               <?php if (can_view('settings')): ?><li class="nav-item"><a class="nav-link pl-3<?= nav_active('settings') ?>" href="<?= url('settings') ?>"><span class="ml-1 item-text">Company settings</span></a></li><?php endif; ?>
+              <?php if (can_view('email')): ?><li class="nav-item"><a class="nav-link pl-3<?= nav_active('email') ?>" href="<?= url('email') ?>"><span class="ml-1 item-text">Email outbox</span></a></li><?php endif; ?>
               <?php if (can_view('audit')): ?><li class="nav-item"><a class="nav-link pl-3<?= nav_active('audit') ?>" href="<?= url('audit') ?>"><span class="ml-1 item-text">Audit trail</span></a></li><?php endif; ?>
             </ul>
           </li>

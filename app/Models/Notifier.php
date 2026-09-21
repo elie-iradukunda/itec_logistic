@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Models;
 
 use Core\Database;
+use Support\Mailer;
 
 /**
  * Writes notifications when something actually happens, and lets a user clear
@@ -171,10 +172,109 @@ final class Notifier
              VALUES (?, NULL, ?, ?, ?, ?, ?)'
         );
         $statement->execute([$key, $roleKey, $title, $message, $route, $severity]);
+
+        // Only email an alert the first time it is raised, which is what the
+        // INSERT IGNORE above has just told us.
+        if ($statement->rowCount() > 0 && Settings::int('email_alerts_to_roles', 1) === 1) {
+            self::email($key, null, $roleKey, $title, $message, $route, $severity, 'alert', null, null);
+        }
+    }
+
+    // ----------------------------------------------------------------- email
+
+    /**
+     * Sends the same update by email to whoever the notification was for.
+     *
+     * The bell tells someone who is already looking at the screen. Email reaches
+     * the driver on the road and the accountant who has not signed in today, so
+     * every notification goes both ways unless the person has opted out.
+     */
+    private static function email(
+        string $key,
+        ?int $userId,
+        ?string $roleKey,
+        string $title,
+        string $message,
+        ?string $route,
+        string $severity,
+        string $category,
+        ?string $entityType,
+        ?string $entityId
+    ): void {
+        try {
+            if (!Mailer::enabled() || !Mailer::passesThreshold($severity)) {
+                return;
+            }
+
+            foreach (self::recipients($userId, $roleKey) as $person) {
+                Mailer::send([
+                    // One message per person per notification, so a role of six
+                    // people gets six letters and no duplicates.
+                    'key' => mb_substr($key . '-u' . $person['id'], 0, 120),
+                    'category' => $category,
+                    'to' => $person['email'],
+                    'to_name' => $person['full_name'],
+                    'user_id' => (int) $person['id'],
+                    'subject' => $title,
+                    'heading' => $title,
+                    'lines' => [$message],
+                    'facts' => array_filter([
+                        'Reference' => $entityId,
+                        'Area' => $entityType === null ? null : ucfirst(str_replace('_', ' ', $entityType)),
+                    ]),
+                    'action' => $route === null || $route === '' ? null : [
+                        'label' => 'Open it in LMS',
+                        'path' => $route,
+                    ],
+                    'entity_type' => $entityType,
+                    'entity_id' => $entityId,
+                ]);
+            }
+        } catch (\Throwable) {
+            // A notification is never worth failing the user's action for, and
+            // an email even less so.
+        }
+    }
+
+    /**
+     * Who should receive this: one person, or everyone holding a role.
+     *
+     * Inactive and deleted accounts are left out, as is anyone who has turned
+     * email off for themselves.
+     *
+     * @return list<array{id: int, email: string, full_name: string}>
+     */
+    private static function recipients(?int $userId, ?string $roleKey): array
+    {
+        if ($userId !== null) {
+            $statement = Database::connection()->prepare(
+                "SELECT id, email, full_name FROM users
+                  WHERE id = ? AND status = 'active' AND deleted_at IS NULL AND notify_by_email = 1"
+            );
+            $statement->execute([$userId]);
+
+            return $statement->fetchAll();
+        }
+
+        if ($roleKey === null || $roleKey === '') {
+            return [];
+        }
+
+        $statement = Database::connection()->prepare(
+            "SELECT u.id, u.email, u.full_name
+               FROM users u
+               INNER JOIN roles r ON r.id = u.role_id
+              WHERE r.role_key = ? AND u.status = 'active' AND u.deleted_at IS NULL AND u.notify_by_email = 1"
+        );
+        $statement->execute([$roleKey]);
+
+        return $statement->fetchAll();
     }
 
     private static function insert(?int $userId, ?string $roleKey, string $title, string $message, ?string $route, string $severity, ?string $entityType, ?string $entityId): void
     {
+        $key = uniqid('n-', true);
+
         try {
             $severity = in_array($severity, ['info', 'success', 'warning', 'danger'], true) ? $severity : 'info';
             $statement = Database::connection()->prepare(
@@ -182,7 +282,7 @@ final class Notifier
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $statement->execute([
-                uniqid('n-', true),
+                $key,
                 $userId,
                 $roleKey,
                 mb_substr($title, 0, 150),
@@ -194,6 +294,9 @@ final class Notifier
             ]);
         } catch (\Throwable) {
             // A notification is never worth failing the user's action for.
+            return;
         }
+
+        self::email($key, $userId, $roleKey, $title, $message, $route, $severity, 'notification', $entityType, $entityId);
     }
 }

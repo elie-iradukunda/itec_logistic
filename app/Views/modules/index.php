@@ -21,6 +21,12 @@ $cell = static function (mixed $value, array $spec): string {
         return '<span class="text-muted">' . e($spec['empty'] ?? '—') . '</span>';
     }
 
+    // A column may carry its own value => label map, for keys the schema names
+    // but the database stores raw (which reference list an entry belongs to).
+    if (isset($spec['map']) && array_key_exists((string) $value, $spec['map'])) {
+        $value = $spec['map'][(string) $value];
+    }
+
     return match ($spec['type'] ?? 'text') {
         'code' => '<strong>' . e($value) . '</strong>',
         'badge' => '<span class="badge badge-' . e(\Models\Schema::tone((string) $value)) . '">' . e(\Models\Schema::label((string) $value)) . '</span>',
@@ -33,6 +39,7 @@ $cell = static function (mixed $value, array $spec): string {
         'rating' => str_repeat('★', max(0, min(5, (int) $value))) . '<span class="text-muted">' . str_repeat('☆', 5 - max(0, min(5, (int) $value))) . '</span>',
         'privilege' => (int) $value === 1 ? '<span class="badge badge-info">Privileged</span>' : '<span class="badge badge-light">Standard</span>',
         'file' => '<span class="badge badge-light">Attached</span>',
+        'yesno' => (int) $value === 1 ? '<span class="badge badge-success">Yes</span>' : '<span class="text-muted">No</span>',
         'expiry' => (static function (string $date): string {
             $days = days_until($date);
             $shown = e(date('d M Y', (int) strtotime($date)));
@@ -97,7 +104,8 @@ $cell = static function (mixed $value, array $spec): string {
 
       <p class="lms-result-count">
         <?php if ($listing['total'] === 0): ?>
-          No records match.
+          <?php /* "No records match" would blame a search nobody made on a module that is simply still empty. */ ?>
+          <?= $listing['search'] !== '' || $listing['filters'] !== [] ? 'No records match.' : 'Nothing recorded yet.' ?>
         <?php else: ?>
           Showing <strong><?= number_format(($listing['page'] - 1) * $listing['per_page'] + 1) ?>&ndash;<?= number_format(min($listing['page'] * $listing['per_page'], $listing['total'])) ?></strong>
           of <strong><?= number_format($listing['total']) ?></strong> record<?= $listing['total'] === 1 ? '' : 's' ?>

@@ -45,7 +45,10 @@ final class AccountController
             exit;
         }
 
-        $repository->updateProfile($userId, $fullName, $phone, $jobTitle);
+        // An unticked checkbox is simply absent from the request.
+        $notifyByEmail = ($_POST['notify_by_email'] ?? '0') === '1';
+
+        $repository->updateProfile($userId, $fullName, $phone, $jobTitle, $notifyByEmail);
         $_SESSION['logistics_user_name'] = $fullName;
 
         AuditLog::record('account.profile_updated', 'users', (string) $userId);
