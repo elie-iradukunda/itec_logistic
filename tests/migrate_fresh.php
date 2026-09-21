@@ -65,8 +65,14 @@ try {
     };
 
     $assert(str_contains($firstRun, 'Imported database/schema.sql'), 'a fresh run imports the schema');
-    foreach (['seed.sql', 'seed_company_scenario.sql', 'seed_extended.sql'] as $seed) {
+
+    // What a real company gets: the roles, the logins, the chart of accounts and
+    // the reference lists, and none of somebody else's vehicles and trips.
+    foreach (['seed.sql', 'seed_accounting.sql'] as $seed) {
         $assert(str_contains($firstRun, "Loaded database/{$seed}"), "a fresh run loads {$seed}");
+    }
+    foreach (['seed_demo_base.sql', 'seed_company_scenario.sql', 'seed_extended.sql'] as $seed) {
+        $assert(!str_contains($firstRun, "Loaded database/{$seed}"), "a plain run leaves {$seed} out");
     }
 
     $migrationFiles = glob(__DIR__ . '/../database/migrations/*.sql') ?: [];
@@ -89,10 +95,17 @@ try {
 
     $assert((int) $pdo->query('SELECT COUNT(*) FROM roles')->fetchColumn() === 7, 'seven roles are created');
     $assert((int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn() === 7, 'seven users are created');
-    $assert((int) $pdo->query('SELECT COUNT(*) FROM permissions')->fetchColumn() >= 20, 'the permission catalogue is populated');
+    $assert((int) $pdo->query('SELECT COUNT(*) FROM permissions')->fetchColumn() >= 28, 'every module has a permission row');
     $assert((int) $pdo->query('SELECT COUNT(*) FROM role_permissions')->fetchColumn() >= 60, 'the role matrix is populated');
     $assert((int) $pdo->query('SELECT COUNT(*) FROM company_settings')->fetchColumn() >= 15, 'company settings are populated');
-    $assert((int) $pdo->query('SELECT COUNT(*) FROM reports WHERE report_key IS NOT NULL')->fetchColumn() >= 8, 'the saved reports point at live queries');
+    $assert((int) $pdo->query('SELECT COUNT(*) FROM payment_methods')->fetchColumn() >= 5, 'the payment methods are seeded');
+    $assert((int) $pdo->query('SELECT COUNT(*) FROM lookup_values')->fetchColumn() >= 60, 'the reference lists are seeded');
+    $assert((int) $pdo->query('SELECT COUNT(*) FROM gl_accounts')->fetchColumn() >= 30, 'the chart of accounts is seeded');
+
+    // Nothing operational: a new company starts with an empty working set.
+    foreach (['vehicles', 'drivers', 'trips', 'shipments', 'deliveries', 'invoices', 'payments', 'inventory_items', 'warehouses'] as $empty) {
+        $assert((int) $pdo->query("SELECT COUNT(*) FROM {$empty}")->fetchColumn() === 0, "a fresh install has no {$empty}");
+    }
 
     // Every table holds the same rows on a second run, which is what makes the
     // seeds safe to re-run. The audit trail is the exception: it is a log, so a
@@ -108,8 +121,8 @@ try {
 
     // The ledger is posted as part of setting up, so the books are not empty the
     // first time anyone opens them.
-    $assert(str_contains($firstRun, 'to the ledger') || str_contains($firstRun, 'already up to date'), 'a fresh run posts the seeded operations to the ledger');
-    $assert((int) $pdo->query("SELECT COUNT(*) FROM gl_journal_entries WHERE deleted_at IS NULL")->fetchColumn() > 1, 'the ledger has entries after setup');
+    $assert(str_contains($firstRun, 'to the ledger') || str_contains($firstRun, 'already up to date'), 'a fresh run reaches the ledger step');
+    $assert((int) $pdo->query("SELECT COUNT(*) FROM gl_journal_entries WHERE deleted_at IS NULL")->fetchColumn() === 0, 'a fresh install starts with an empty ledger');
 
     $sides = $pdo->query(
         "SELECT COALESCE(SUM(l.debit), 0) d, COALESCE(SUM(l.credit), 0) c
