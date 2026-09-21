@@ -30,6 +30,90 @@ final class Notifier
         self::insert($userId, null, $title, $message, $route, $severity, $entityType, $entityId);
     }
 
+    /**
+     * Tells finance, and the customer, that a payment landed.
+     *
+     * The receipt goes to the address on the customer record. A customer with no
+     * address simply does not get one; the bell entry still records the payment.
+     */
+    public static function paymentReceived(int $paymentId): void
+    {
+        $statement = \Core\Database::connection()->prepare(
+            'SELECT p.payment_code, p.amount, p.method, p.reference, p.paid_at,
+                    i.invoice_number, i.total_amount, i.amount_paid, i.status,
+                    c.customer_name, c.contact_name, c.email
+               FROM payments p
+               INNER JOIN invoices i ON i.id = p.invoice_id
+               LEFT JOIN customers c ON c.id = i.customer_id
+              WHERE p.id = ?'
+        );
+        $statement->execute([$paymentId]);
+        $row = $statement->fetch();
+
+        if ($row === false) {
+            return;
+        }
+
+        $outstanding = max(0.0, (float) $row['total_amount'] - (float) $row['amount_paid']);
+
+        self::toRole(
+            'finance',
+            'Payment received',
+            sprintf('%s of %s against %s. %s still outstanding.',
+                $row['payment_code'], Settings::money((float) $row['amount']), $row['invoice_number'], Settings::money($outstanding)),
+            'payments',
+            'success',
+            'payments',
+            (string) $row['payment_code']
+        );
+
+        if (trim((string) $row['email']) === '') {
+            return;
+        }
+
+        \Support\Mailer::send([
+            'key' => 'payment-receipt-' . $paymentId,
+            'category' => 'invoice',
+            'to' => trim((string) $row['email']),
+            'to_name' => trim((string) ($row['contact_name'] ?: $row['customer_name'])),
+            'subject' => sprintf('Payment received — %s', $row['invoice_number']),
+            'heading' => 'Receipt ' . $row['payment_code'],
+            'lines' => [
+                sprintf('Dear %s,', $row['contact_name'] ?: $row['customer_name']),
+                sprintf(
+                    'Thank you. We confirm receipt of your payment against invoice %s. This message serves as your receipt.',
+                    $row['invoice_number']
+                ),
+            ],
+            'items' => [
+                'title' => 'Payment received',
+                'columns' => ['detail' => 'Detail', 'value' => 'Amount'],
+                'numeric' => ['value'],
+                'rows' => [
+                    ['detail' => 'Invoice total', 'value' => Settings::money((float) $row['total_amount'])],
+                    ['detail' => 'Paid before this receipt', 'value' => Settings::money(max(0.0, (float) $row['amount_paid'] - (float) $row['amount']))],
+                    ['detail' => 'This payment', 'value' => Settings::money((float) $row['amount'])],
+                ],
+                'totals' => [$outstanding > 0 ? 'Still outstanding' : 'Balance' => Settings::money($outstanding)],
+            ],
+            'facts' => [
+                'Receipt number' => (string) $row['payment_code'],
+                'Invoice number' => (string) $row['invoice_number'],
+                'Date received' => date('Y-m-d', (int) strtotime((string) $row['paid_at'])),
+                'Paid by' => PaymentMethod::name((string) $row['method']),
+                'Your reference' => (string) ($row['reference'] ?: '—'),
+            ],
+            'closing' => [
+                $outstanding > 0
+                    ? sprintf('%s remains outstanding on this invoice. Please quote the invoice number on your next payment.', Settings::money($outstanding))
+                    : 'This invoice is now settled in full. No further action is needed.',
+                'If any detail above is not as you expected, reply to this message and we will check it.',
+            ],
+            'entity_type' => 'payments',
+            'entity_id' => (string) $row['payment_code'],
+        ]);
+    }
+
     /** @param list<string> $roleKeys */
     public static function toRoles(array $roleKeys, string $title, string $message, ?string $route = null, string $severity = 'info', ?string $entityType = null, ?string $entityId = null): void
     {

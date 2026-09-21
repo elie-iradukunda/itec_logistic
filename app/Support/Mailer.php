@@ -303,6 +303,48 @@ final class Mailer
             $body .= '<p style="margin:0 0 14px;font-size:15px;line-height:1.6;color:#33404c">' . $escape($line) . '</p>';
         }
 
+        // Items, lines, products: things with a quantity and a price belong in a
+        // table with headings, not in a run of sentences. A supplier reading an
+        // order, or a customer checking an invoice, is comparing columns.
+        if (!empty($message['items']['rows'])) {
+            $items = $message['items'];
+            $columns = $items['columns'] ?? [];
+            $align = static fn (string $key): string => in_array($key, $items['numeric'] ?? [], true) ? 'right' : 'left';
+
+            if (!empty($items['title'])) {
+                $body .= '<p style="margin:22px 0 8px;font-size:12px;letter-spacing:.8px;text-transform:uppercase;color:#77828d;font-weight:700">'
+                    . $escape($items['title']) . '</p>';
+            }
+
+            $body .= '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:0 0 18px;border-collapse:collapse">';
+
+            $body .= '<tr>';
+            foreach ($columns as $key => $label) {
+                $body .= '<th align="' . $align((string) $key) . '" style="padding:8px 10px;background:#f2f5f8;border-bottom:2px solid ' . $colour
+                    . ';font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:#4a5560;font-weight:700">' . $escape($label) . '</th>';
+            }
+            $body .= '</tr>';
+
+            foreach ($items['rows'] as $row) {
+                $body .= '<tr>';
+                foreach ($columns as $key => $label) {
+                    $body .= '<td align="' . $align((string) $key) . '" style="padding:9px 10px;border-bottom:1px solid #e9edf1;font-size:14px;color:#22303c">'
+                        . $escape($row[$key] ?? '') . '</td>';
+                }
+                $body .= '</tr>';
+            }
+
+            foreach ($items['totals'] ?? [] as $label => $value) {
+                $span = max(1, count($columns) - 1);
+                $body .= '<tr>'
+                    . '<td colspan="' . $span . '" align="right" style="padding:9px 10px;font-size:13px;color:#77828d">' . $escape($label) . '</td>'
+                    . '<td align="right" style="padding:9px 10px;font-size:15px;color:#18222c;font-weight:700;border-top:1px solid #e9edf1">' . $escape($value) . '</td>'
+                    . '</tr>';
+            }
+
+            $body .= '</table>';
+        }
+
         if (!empty($message['facts'])) {
             $body .= '<table role="presentation" cellpadding="0" cellspacing="0" style="width:100%;margin:18px 0;border-collapse:collapse">';
             foreach ($message['facts'] as $label => $value) {
@@ -315,6 +357,12 @@ final class Mailer
                     . '</tr>';
             }
             $body .= '</table>';
+        }
+
+        // What is said after the numbers: how to quote a reference, who to reply
+        // to. It reads as the close of a letter rather than part of the table.
+        foreach ((array) ($message['closing'] ?? []) as $line) {
+            $body .= '<p style="margin:0 0 12px;font-size:14px;line-height:1.6;color:#5b6670">' . $escape($line) . '</p>';
         }
 
         if (!empty($message['action']['label'])) {
@@ -354,6 +402,7 @@ final class Mailer
             . '</td></tr>'
             . '<tr><td style="padding:16px 26px;background:#f7f9fb;border-top:1px solid #e9edf1">'
             . '<p style="margin:0;font-size:11px;line-height:1.6;color:#8a949e">' . $signature . '</p>'
+            . '<p style="margin:6px 0 0;font-size:11px;color:#9aa4ad">Powered by ' . $escape(\vendor_name()) . ' &copy; ' . date('Y') . '</p>'
             . '</td></tr>'
             . '</table></td></tr></table></body></html>';
     }
@@ -368,10 +417,31 @@ final class Mailer
             $parts[] = '';
         }
 
+        if (!empty($message['items']['rows'])) {
+            $items = $message['items'];
+            $parts[] = strtoupper((string) ($items['title'] ?? 'Items'));
+            foreach ($items['rows'] as $row) {
+                $cells = [];
+                foreach ($items['columns'] ?? [] as $key => $label) {
+                    $cells[] = $label . ': ' . ($row[$key] ?? '');
+                }
+                $parts[] = '  ' . implode('  |  ', $cells);
+            }
+            foreach ($items['totals'] ?? [] as $label => $value) {
+                $parts[] = '  ' . $label . ': ' . $value;
+            }
+            $parts[] = '';
+        }
+
         foreach ((array) ($message['facts'] ?? []) as $label => $value) {
             if ($value !== null && $value !== '') {
                 $parts[] = $label . ': ' . $value;
             }
+        }
+
+        foreach ((array) ($message['closing'] ?? []) as $line) {
+            $parts[] = '';
+            $parts[] = (string) $line;
         }
 
         if (!empty($message['action']['label'])) {
@@ -384,6 +454,7 @@ final class Mailer
 
         $parts[] = '';
         $parts[] = self::signature();
+        $parts[] = 'Powered by ' . \vendor_name() . ' (c) ' . date('Y');
 
         return implode("\n", $parts);
     }

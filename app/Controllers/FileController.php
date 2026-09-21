@@ -43,7 +43,7 @@ final class FileController
             $this->fail(403, 'This file is not available for your role.');
         }
 
-        $root = realpath(dirname(__DIR__, 2) . '/storage/uploads');
+        $root = realpath((string) \config('uploads.path', dirname(__DIR__, 2) . '/storage/uploads'));
         $path = realpath($root . '/' . $module . '/' . $name);
 
         if ($root === false || $path === false || !str_starts_with($path, $root . DIRECTORY_SEPARATOR) || !is_file($path)) {

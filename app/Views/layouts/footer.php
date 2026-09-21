@@ -1,4 +1,6 @@
-    <footer class="lms-footer"><?= e(company_name()) ?> &middot; Logistics Management System &copy; <?= date('Y') ?></footer>
+    <?php /* The company using the system is named all over its own pages; the
+             footer credits whoever built it, which is not the same company. */ ?>
+    <footer class="lms-footer">Powered by <?= e(vendor_name()) ?> &copy; <?= date('Y') ?></footer>
   </main>
 </div>
 <script src="<?= $baseUrl ?>/assets/js/jquery.min.js"></script>

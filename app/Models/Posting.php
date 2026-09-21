@@ -39,15 +39,14 @@ final class Posting
         'Insurance' => '6100',
     ];
 
-    /** How a payment was made decides which account it left or entered. */
-    private const PAYMENT_ACCOUNTS = [
-        'cash' => '1010',
-        'bank_transfer' => '1020',
-        'cheque' => '1020',
-        'card' => '1020',
-        'mobile_money' => '1030',
-        'fuel_card' => '2000',   // billed monthly by the fuel company
-    ];
+    /**
+     * How a payment was made decides which account it left or entered, and the
+     * company decides that on the Payment methods page rather than here.
+     */
+    private static function paymentAccount(string $method, string $fallback = '1020'): string
+    {
+        return PaymentMethod::accountCode($method, $fallback);
+    }
 
     private const RECEIVABLE = '1100';
     private const PAYABLE = '2000';
@@ -140,7 +139,7 @@ final class Posting
             return null;
         }
 
-        $bank = self::PAYMENT_ACCOUNTS[(string) $payment['method']] ?? '1020';
+        $bank = self::paymentAccount((string) $payment['method']);
         $who = $payment['customer_name'] ?? 'customer';
 
         return Ledger::post(
@@ -180,7 +179,7 @@ final class Posting
         }
 
         $account = self::EXPENSE_ACCOUNTS[(string) $expense['category']] ?? self::OTHER_EXPENSE;
-        $credit = self::PAYMENT_ACCOUNTS[(string) $expense['payment_method']] ?? self::PAYABLE;
+        $credit = self::paymentAccount((string) $expense['payment_method'], self::PAYABLE);
         $what = trim((string) $expense['category'] . ' ' . (string) ($expense['plate_number'] ?? ''));
 
         return Ledger::post(

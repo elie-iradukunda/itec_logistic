@@ -111,16 +111,67 @@ final class StockLedger
      */
     public static function recalculate(int $itemId): float
     {
-        $statement = Database::connection()->prepare(
-            "SELECT COALESCE(SUM(CASE WHEN movement_type IN ('stock_in','transfer_in','return','adjustment') THEN quantity ELSE -quantity END), 0)
-             FROM stock_movements WHERE item_id = ?"
-        );
-        $statement->execute([$itemId]);
-        $balance = round((float) $statement->fetchColumn(), 2);
+        return self::rebuild($itemId);
+    }
+
+    /**
+     * Replays every movement for one item in the order they happened.
+     *
+     * Summing the movements was not enough: each row also has to carry the
+     * balance that stood after it, which is what makes the ledger readable
+     * ("120 in, 20 out, 100 left") instead of a list of amounts. Replaying also
+     * repairs rows written before this existed, and rows whose date or quantity
+     * was edited afterwards.
+     */
+    public static function rebuild(int $itemId): float
+    {
+        $db = Database::connection();
+
+        $rows = $db->prepare('SELECT id, movement_type, quantity FROM stock_movements WHERE item_id = ? ORDER BY moved_at, id');
+        $rows->execute([$itemId]);
+
+        $stamp = $db->prepare('UPDATE stock_movements SET balance_after = ? WHERE id = ?');
+        $balance = 0.0;
+
+        foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $quantity = abs((float) $row['quantity']);
+            $balance = round($balance + (Schema::movementAdds((string) $row['movement_type']) ? $quantity : -$quantity), 2);
+            $stamp->execute([$balance, (int) $row['id']]);
+        }
 
         self::setBalance($itemId, max(0.0, $balance));
 
         return $balance;
+    }
+
+    /**
+     * The stock a company already holds on the day it starts using the system.
+     *
+     * It is entered as a quantity on the item, but it becomes a movement like
+     * any other, so the ledger explains the whole balance rather than starting
+     * from a number nobody can account for.
+     */
+    public static function openingBalance(int $itemId, float $quantity, ?float $unitCost = null): void
+    {
+        // The quantity is already sitting on the item, having been typed on the
+        // form. Clear it first, or recording it as a movement would add it to
+        // itself and double the opening stock.
+        self::setBalance($itemId, 0.0);
+
+        if ($quantity <= 0) {
+            return;
+        }
+
+        self::record(
+            $itemId,
+            'stock_in',
+            $quantity,
+            $unitCost,
+            'adjustment',
+            'OPENING',
+            null,
+            'Stock on hand when the item was first recorded.'
+        );
     }
 
     /** Sets the balance and derives the stock status from the minimum level. */

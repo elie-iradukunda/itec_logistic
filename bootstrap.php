@@ -254,6 +254,22 @@ function company_name(): string
     }
 }
 
+/**
+ * Who built the system, as opposed to who is using it.
+ *
+ * LMS is installed for more than one company, so the footer credits the vendor
+ * rather than repeating the customer's own name back at them. It is a setting,
+ * so a reseller can put their own name on it.
+ */
+function vendor_name(): string
+{
+    try {
+        return \Models\Settings::get('vendor_name', 'ITEC Ltd');
+    } catch (\Throwable) {
+        return 'ITEC Ltd';
+    }
+}
+
 function time_ago(?string $datetime): string
 {
     $time = $datetime ? strtotime($datetime) : false;
@@ -332,7 +348,7 @@ function navigation(): array
             ['warehouses', 'Warehouses'], ['warehouse', 'Inventory'], ['movements', 'Stock movements'], ['procurement', 'Procurement'], ['suppliers', 'Suppliers'],
         ]],
         ['label' => 'Accounting', 'icon' => 'book', 'id' => 'accountingMenu', 'items' => [
-            ['books', 'Accounting books'], ['journal', 'Journal'], ['accounts', 'Chart of accounts'],
+            ['books', 'Accounting books'], ['journal', 'Journal'], ['accounts', 'Chart of accounts'], ['payment_methods', 'Payment methods'],
         ]],
     ];
 
@@ -356,10 +372,15 @@ function view(string $template, array $data = []): void
 }
 
 // Role switching stays available to privileged accounts only.
-if (isset($_GET['role'], $roleDefinitions[$_GET['role']]) && can_switch_role()) {
-    $_SESSION['logistics_role'] = $_GET['role'];
+//
+// The parameter is `switch_role`, not `role`: an administrator opening the role
+// permission matrix for Finance passes `?role=finance` meaning "show me that
+// role", and was being switched into it instead — which cost them the very
+// permission the page needs, and bounced them to their dashboard.
+if (isset($_GET['switch_role'], $roleDefinitions[$_GET['switch_role']]) && can_switch_role()) {
+    $_SESSION['logistics_role'] = $_GET['switch_role'];
     try {
-        $account = (new \Models\UserRepository())->activeLoginAccounts()[$_GET['role']] ?? null;
+        $account = (new \Models\UserRepository())->activeLoginAccounts()[$_GET['switch_role']] ?? null;
         if ($account !== null) {
             $_SESSION['logistics_user_id'] = $account['id'];
             $_SESSION['logistics_user_name'] = $account['name'];

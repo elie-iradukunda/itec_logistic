@@ -108,7 +108,7 @@ $searchIndex[] = ['label' => 'My profile', 'url' => url('account'), 'group' => '
         </div>
       </li>
       <?php if (can_switch_role()): ?>
-      <li class="nav-item dropdown"><a class="nav-link logistics-top-control dropdown-toggle" href="#" data-toggle="dropdown"><i class="fe fe-users fe-16 mr-1"></i><span>Role</span><strong><?= e(role_label()) ?></strong></a><div class="dropdown-menu dropdown-menu-right"><h6 class="dropdown-header">Switch role</h6><?php foreach (role_definitions() as $roleKey => $roleDefinition): ?><a class="dropdown-item <?= current_role() === $roleKey ? 'active' : '' ?>" href="<?= url('dashboard', ['role' => $roleKey]) ?>"><?= e($roleDefinition['label']) ?></a><?php endforeach; ?></div></li>
+      <li class="nav-item dropdown"><a class="nav-link logistics-top-control dropdown-toggle" href="#" data-toggle="dropdown"><i class="fe fe-users fe-16 mr-1"></i><span>Role</span><strong><?= e(role_label()) ?></strong></a><div class="dropdown-menu dropdown-menu-right"><h6 class="dropdown-header">Switch role</h6><?php foreach (role_definitions() as $roleKey => $roleDefinition): ?><a class="dropdown-item <?= current_role() === $roleKey ? 'active' : '' ?>" href="<?= url('dashboard', ['switch_role' => $roleKey]) ?>"><?= e($roleDefinition['label']) ?></a><?php endforeach; ?></div></li>
       <?php else: ?>
       <li class="nav-item"><span class="nav-link logistics-top-control lms-role-static" title="Your role"><i class="fe fe-users fe-16 mr-1"></i><span>Role</span><strong><?= e(role_label()) ?></strong></span></li>
       <?php endif; ?>

@@ -88,7 +88,7 @@ $modules = [
     'customers', 'rates', 'invoices', 'payments',
     'fuel', 'expenses',
     'warehouses', 'warehouse', 'movements', 'procurement', 'suppliers',
-    'users', 'accounts', 'lookups',
+    'users', 'accounts', 'payment_methods', 'lookups',
 ];
 
 foreach ($modules as $module) {

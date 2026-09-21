@@ -449,7 +449,107 @@ final class Workflow
 
         Notifier::toRole('warehouse_manager', 'Purchase request approved', sprintf('%s is approved and can be ordered.', $code), 'procurement', 'success', 'procurement', $code);
 
-        return sprintf('Purchase request %s approved.', $code);
+        $ordered = self::emailPurchaseOrder($db, $request, $code);
+
+        return sprintf('Purchase request %s approved.%s', $code, $ordered);
+    }
+
+    /**
+     * Sends the approved request to the supplier as an order.
+     *
+     * Approval is the moment the company commits to buying, so it is the moment
+     * the supplier needs to hear about it. Without this the approval only ever
+     * reached the people who already knew, and somebody still had to pick up the
+     * phone — which is where the quantity and the price start to drift.
+     */
+    private static function emailPurchaseOrder(PDO $db, array $request, string $code): string
+    {
+        if (empty($request['supplier_id'])) {
+            return ' No supplier is named on it, so no order was sent.';
+        }
+
+        $supplier = $db->prepare('SELECT supplier_name, contact_name, email, payment_terms_days FROM suppliers WHERE id = ? AND deleted_at IS NULL');
+        $supplier->execute([(int) $request['supplier_id']]);
+        $who = $supplier->fetch();
+
+        if ($who === false || trim((string) $who['email']) === '') {
+            return sprintf(' %s has no email address on file, so no order was sent.', $who === false ? 'That supplier' : $who['supplier_name']);
+        }
+
+        $lines = $db->prepare(
+            'SELECT item_name, quantity, unit_of_measure, unit_price, line_total
+               FROM purchase_request_lines WHERE purchase_request_id = ? ORDER BY id'
+        );
+        $lines->execute([(int) $request['id']]);
+
+        $rows = [];
+        foreach ($lines->fetchAll(PDO::FETCH_ASSOC) as $line) {
+            $rows[] = [
+                'item_name' => (string) $line['item_name'],
+                'quantity' => rtrim(rtrim(number_format((float) $line['quantity'], 2, '.', ''), '0'), '.') . ' ' . ($line['unit_of_measure'] ?: 'unit'),
+                'unit_price' => Settings::money((float) $line['unit_price']),
+                'line_total' => Settings::money((float) $line['line_total']),
+            ];
+        }
+
+        // A request approved without itemised lines still has its description.
+        if ($rows === []) {
+            $rows[] = [
+                'item_name' => (string) $request['description'],
+                'quantity' => '—',
+                'unit_price' => '—',
+                'line_total' => Settings::money((float) $request['amount']),
+            ];
+        }
+
+        $warehouse = '';
+        if (!empty($request['warehouse_id'])) {
+            $place = $db->prepare('SELECT warehouse_name, location FROM warehouses WHERE id = ?');
+            $place->execute([(int) $request['warehouse_id']]);
+            $row = $place->fetch();
+            $warehouse = $row === false ? '' : trim($row['warehouse_name'] . ', ' . $row['location']);
+        }
+
+        $result = \Support\Mailer::send([
+            'key' => 'purchase-order-' . $request['id'],
+            'category' => 'invoice',
+            'to' => trim((string) $who['email']),
+            'to_name' => trim((string) ($who['contact_name'] ?: $who['supplier_name'])),
+            'subject' => sprintf('Purchase order %s from %s', $code, \company_name()),
+            'heading' => 'Purchase order ' . $code,
+            'lines' => [
+                sprintf('Dear %s,', $who['contact_name'] ?: $who['supplier_name']),
+                sprintf(
+                    '%s wishes to place the following order with %s. This order has been approved internally and the reference above should be quoted on your delivery note and invoice.',
+                    \company_name(),
+                    $who['supplier_name']
+                ),
+            ],
+            'items' => [
+                'title' => 'Items ordered',
+                'columns' => ['item_name' => 'Item', 'quantity' => 'Quantity', 'unit_price' => 'Unit price', 'line_total' => 'Amount'],
+                'numeric' => ['quantity', 'unit_price', 'line_total'],
+                'rows' => $rows,
+                'totals' => ['Order value' => Settings::money((float) $request['amount'])],
+            ],
+            'facts' => [
+                'Order reference' => $code,
+                'Order date' => date('Y-m-d'),
+                'Deliver to' => $warehouse !== '' ? $warehouse : 'To be confirmed',
+                'Required by' => (string) ($request['expected_date'] ?: 'As soon as possible'),
+                'Payment terms' => sprintf('%d days from delivery', (int) ($who['payment_terms_days'] ?? 30)),
+            ],
+            'closing' => [
+                'Please confirm acceptance of this order and the delivery date by replying to this message.',
+                'Goods are to be delivered to the address above during working hours, accompanied by a delivery note quoting this order reference.',
+            ],
+            'entity_type' => 'procurement',
+            'entity_id' => $code,
+        ]);
+
+        return $result['sent']
+            ? sprintf(' The order was emailed to %s at %s.', $who['supplier_name'], $who['email'])
+            : sprintf(' The order to %s is in the outbox (%s).', $who['email'], $result['reason']);
     }
 
     private static function receivePurchase(PDO $db, array $request, string $code): string
@@ -504,7 +604,105 @@ final class Workflow
 
         Notifier::toRole('finance', 'Invoice issued', sprintf('%s for %s is issued and due on %s.', $code, Settings::money((float) $invoice['total_amount']), $invoice['due_date']), 'invoices', 'info', 'invoices', $code);
 
-        return sprintf('Invoice %s issued for %s.', $code, Settings::money((float) $invoice['total_amount']));
+        $emailed = self::emailInvoice($db, $invoice, $code);
+
+        return sprintf('Invoice %s issued for %s.%s', $code, Settings::money((float) $invoice['total_amount']), $emailed);
+    }
+
+    /**
+     * Sends the invoice to the customer it is addressed to.
+     *
+     * An invoice nobody receives is not a bill, it is a note to self. The address
+     * is the one on the customer record; when it is missing the message says so,
+     * rather than the issue quietly succeeding and the money never arriving.
+     */
+    /** The ways to pay, as the company set them up, for the bottom of an invoice. */
+    private static function paymentFacts(): array
+    {
+        $facts = [];
+
+        foreach (PaymentMethod::invoiceInstructions() as $method) {
+            $facts['Pay by ' . $method['name']] = $method['details'] !== '' ? $method['details'] : 'Ask us for the details';
+        }
+
+        return $facts;
+    }
+
+    private static function emailInvoice(PDO $db, array $invoice, string $code): string
+    {
+        if (empty($invoice['customer_id'])) {
+            return ' It is not addressed to a customer, so nothing was emailed.';
+        }
+
+        $customer = $db->prepare('SELECT customer_name, contact_name, email FROM customers WHERE id = ? AND deleted_at IS NULL');
+        $customer->execute([(int) $invoice['customer_id']]);
+        $row = $customer->fetch();
+
+        if ($row === false || trim((string) $row['email']) === '') {
+            return sprintf(' %s has no email address on file, so nothing was sent.', $row === false ? 'That customer' : $row['customer_name']);
+        }
+
+        $lines = $db->prepare('SELECT description, quantity, unit_price, line_total FROM invoice_lines WHERE invoice_id = ? ORDER BY id');
+        $lines->execute([(int) $invoice['id']]);
+
+        $rows = [];
+        foreach ($lines->fetchAll(PDO::FETCH_ASSOC) as $line) {
+            $rows[] = [
+                'description' => (string) $line['description'],
+                'quantity' => rtrim(rtrim(number_format((float) $line['quantity'], 2, '.', ''), '0'), '.'),
+                'unit_price' => Settings::money((float) $line['unit_price']),
+                'line_total' => Settings::money((float) $line['line_total']),
+            ];
+        }
+
+        $result = \Support\Mailer::send([
+            'key' => 'invoice-issued-' . $invoice['id'],
+            'category' => 'invoice',
+            'to' => trim((string) $row['email']),
+            'to_name' => trim((string) ($row['contact_name'] ?: $row['customer_name'])),
+            'subject' => sprintf('Invoice %s from %s', $code, \company_name()),
+            'heading' => 'Invoice ' . $code,
+            'lines' => [
+                sprintf('Dear %s,', $row['contact_name'] ?: $row['customer_name']),
+                sprintf(
+                    'Thank you for your business. Invoice %s is set out below, covering the work carried out for %s. It falls due on %s.',
+                    $code,
+                    $row['customer_name'],
+                    (string) $invoice['due_date']
+                ),
+            ],
+            'items' => [
+                'title' => 'What this invoice covers',
+                'columns' => ['description' => 'Description', 'quantity' => 'Qty', 'unit_price' => 'Unit price', 'line_total' => 'Amount'],
+                'numeric' => ['quantity', 'unit_price', 'line_total'],
+                'rows' => $rows,
+                'totals' => [
+                    'Subtotal' => Settings::money((float) $invoice['subtotal']),
+                    sprintf('VAT at %s%%', rtrim(rtrim(number_format((float) $invoice['tax_rate'], 2, '.', ''), '0'), '.')) => Settings::money((float) $invoice['tax_amount']),
+                    'Total due' => Settings::money((float) $invoice['total_amount']),
+                ],
+            ],
+            'facts' => array_merge(
+                [
+                    'Invoice number' => $code,
+                    'Invoice date' => (string) ($invoice['issue_date'] ?: date('Y-m-d')),
+                    'Payment due by' => (string) $invoice['due_date'],
+                ],
+                // A bill that does not say where to send the money is a bill
+                // somebody has to ring up about.
+                self::paymentFacts()
+            ),
+            'closing' => [
+                'Please quote the invoice number when you pay so we can match it against your account.',
+                'If anything on this invoice looks wrong, reply to this message and we will look into it.',
+            ],
+            'entity_type' => 'invoices',
+            'entity_id' => $code,
+        ]);
+
+        return $result['sent']
+            ? sprintf(' It was emailed to %s.', $row['email'])
+            : sprintf(' The email to %s is in the outbox (%s).', $row['email'], $result['reason']);
     }
 
     /** Cancelling an invoice takes its entry back out of the ledger. */

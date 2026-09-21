@@ -219,14 +219,46 @@ final class LogisticsData
         }
 
         $where = $relation['where'] ?? '';
+        $parameters = [];
+
+        // A drop-down is a list of records, so it obeys the same limits as a
+        // list of records. A driver offered every truck in the yard could file
+        // his fuel against one he has never driven; `scope` narrows the offer to
+        // the rows that role has any business choosing.
+        $scope = $relation['scope'][\current_role()] ?? null;
+        if ($scope !== null) {
+            $driverId = \current_driver_id();
+            if ($driverId === null) {
+                return [];
+            }
+            // With emulated prepares off, MySQL will not accept the same named
+            // placeholder twice, and a scope that spans two subqueries needs it
+            // twice. Each occurrence gets its own name.
+            $seq = 0;
+            $scope = preg_replace_callback(
+                '/:driver_id\b/',
+                static function () use (&$seq, &$parameters, $driverId): string {
+                    $name = ':driver_id_' . ++$seq;
+                    $parameters[$name] = $driverId;
+                    return $name;
+                },
+                $scope
+            );
+
+            $where = $where === '' ? $scope : "({$where}) AND ({$scope})";
+        }
+
         $sql = "SELECT id, {$labelColumn} AS label FROM {$table}";
         if ($where !== '') {
             $sql .= " WHERE {$where}";
         }
         $sql .= " ORDER BY {$labelColumn}";
 
+        $statement = self::db()->prepare($sql);
+        $statement->execute($parameters);
+
         $options = [];
-        foreach (self::db()->query($sql)->fetchAll() as $row) {
+        foreach ($statement->fetchAll() as $row) {
             $options[(int) $row['id']] = (string) $row['label'];
         }
 
@@ -695,8 +727,33 @@ final class LogisticsData
             $columns['tax_rate'] ??= Settings::float('tax_rate', 18.0);
         }
 
-        if ($key === 'warehouse' && $id === null) {
-            $columns['status'] = self::stockStatus((float) ($columns['quantity'] ?? 0), (float) ($columns['minimum_level'] ?? 0));
+        if ($key === 'warehouse') {
+            if ($id === null) {
+                $columns['status'] = self::stockStatus((float) ($columns['quantity'] ?? 0), (float) ($columns['minimum_level'] ?? 0));
+            } else {
+                // On hand is the ledger's answer, not a field. Editing the item's
+                // name or its minimum level must not quietly rewrite the balance
+                // that its movements add up to.
+                unset($columns['quantity'], $columns['status']);
+            }
+        }
+
+        if ($key === 'movements' && $id === null) {
+            $columns['performed_by'] = \current_user_id();
+        }
+
+        if ($key === 'payment_methods') {
+            // What payments store is the key, and a key that changes would
+            // orphan every payment filed under it. It is made once, from the
+            // name, and then left alone.
+            if ($id === null) {
+                $source = trim((string) ($columns['method_key'] ?? ''));
+                $source = $source !== '' ? $source : (string) $columns['method_name'];
+                $slug = trim(preg_replace('/[^a-z0-9]+/', '_', strtolower($source)) ?? '', '_');
+                $columns['method_key'] = $slug !== '' ? substr($slug, 0, 40) : 'method_' . time();
+            } else {
+                unset($columns['method_key']);
+            }
         }
 
         // Who raised a request, filed a claim or took a payment is a fact about
@@ -844,13 +901,16 @@ final class LogisticsData
                ->execute([(int) $columns['vehicle_id']]);
         }
 
-        if ($key === 'warehouse') {
-            StockLedger::setBalance($id, (float) ($columns['quantity'] ?? 0));
+        if ($key === 'warehouse' && $before === [] && array_key_exists('quantity', $columns) && $columns['quantity'] !== null) {
+            // A new item's opening stock becomes the first movement, so the
+            // balance is always something the ledger can account for.
+            StockLedger::openingBalance($id, (float) $columns['quantity'], isset($columns['unit_cost']) ? (float) $columns['unit_cost'] : null);
         }
 
         if ($key === 'movements') {
-            // The movement row is already written; move the item balance with it.
-            StockLedger::recalculate((int) $columns['item_id']);
+            // The movement row is already written; replay the ledger so this row
+            // carries its balance and the item follows it.
+            StockLedger::rebuild((int) $columns['item_id']);
         }
 
         if ($key === 'invoices') {
@@ -867,6 +927,12 @@ final class LogisticsData
             self::recalculateInvoice((int) $columns['invoice_id']);
             Posting::tryPost('payment', $id);
             Posting::tryPost('invoice', (int) $columns['invoice_id']);
+
+            // Somebody who has just paid should hear that it arrived, from the
+            // company rather than from their own bank statement.
+            if ($before === []) {
+                Notifier::paymentReceived($id);
+            }
         }
     }
 
@@ -1173,8 +1239,9 @@ final class LogisticsData
             return "{$label} could not be uploaded.";
         }
 
-        if (($file['size'] ?? 0) > 5 * 1024 * 1024) {
-            return "{$label} must be 5 MB or smaller.";
+        $limit = (int) \config('uploads.max_bytes', 5242880);
+        if (($file['size'] ?? 0) > $limit) {
+            return sprintf('%s must be %s MB or smaller.', $label, rtrim(rtrim(number_format($limit / 1048576, 1, '.', ''), '0'), '.'));
         }
 
         $extension = strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
@@ -1193,7 +1260,7 @@ final class LogisticsData
         }
 
         $extension = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
-        $directory = dirname(__DIR__, 2) . '/storage/uploads/' . $key;
+        $directory = rtrim((string) \config('uploads.path', dirname(__DIR__, 2) . '/storage/uploads'), "/\\") . '/' . $key;
         if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
             throw new \RuntimeException('The upload folder could not be created.');
         }
