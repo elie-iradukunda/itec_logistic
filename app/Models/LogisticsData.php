@@ -7,540 +7,1176 @@ namespace Models;
 use Core\Database;
 use PDO;
 
+/**
+ * Generic, schema-driven persistence for every logistics module.
+ *
+ * Records are addressed by their primary key, not by their name, so two people
+ * called Jean Bosco no longer share a URL and renaming a record no longer breaks
+ * its link. Lists are paginated in SQL, a driver only sees their own rows, and a
+ * delete is a soft delete that keeps the row for the audit trail.
+ */
 final class LogisticsData
 {
-    private static ?PDO $db = null;
+    public const PER_PAGE_CHOICES = [10, 25, 50, 100];
 
-    /** users.prvg values: 1 may switch into any role, 2 (the default) may not. */
-    private const PRIVILEGES = [1 => '1 - Can switch roles', 2 => '2 - Standard'];
+    private static ?PDO $db = null;
 
     private static function db(): PDO
     {
-        if (self::$db instanceof PDO) {
-            return self::$db;
+        return self::$db ??= Database::connection();
+    }
+
+    // ------------------------------------------------------------------ read
+
+    /**
+     * One page of a module's list.
+     *
+     * @param array $query  search, filters, sort, page, per_page from the request
+     * @param array $context ['role' => string, 'driver_id' => ?int]
+     * @return array{rows: list<array>, total: int, page: int, pages: int, per_page: int, search: string, filters: array}
+     */
+    public static function listing(string $key, array $query = [], array $context = []): array
+    {
+        $module = Schema::get($key);
+        $alias = $module['alias'];
+
+        [$where, $parameters] = self::conditions($module, $query, $context);
+        $from = sprintf('%s %s %s', $module['table'], $alias, $module['joins'] ?? '');
+
+        $total = (int) self::scalar("SELECT COUNT(*) FROM {$from} WHERE {$where}", $parameters);
+
+        $perPage = (int) ($query['per_page'] ?? 25);
+        $perPage = in_array($perPage, self::PER_PAGE_CHOICES, true) ? $perPage : 25;
+        $pages = max(1, (int) ceil($total / $perPage));
+        $page = max(1, min($pages, (int) ($query['page'] ?? 1)));
+        $offset = ($page - 1) * $perPage;
+
+        $order = self::order($module, (string) ($query['sort'] ?? ''), (string) ($query['dir'] ?? ''));
+        $select = implode(', ', $module['select']);
+
+        $statement = self::db()->prepare(
+            "SELECT {$select} FROM {$from} WHERE {$where} ORDER BY {$order} LIMIT {$perPage} OFFSET {$offset}"
+        );
+        $statement->execute($parameters);
+
+        return [
+            'rows' => $statement->fetchAll(),
+            'total' => $total,
+            'page' => $page,
+            'pages' => $pages,
+            'per_page' => $perPage,
+            'search' => (string) ($query['q'] ?? ''),
+            'filters' => self::activeFilters($module, $query),
+            'sort' => (string) ($query['sort'] ?? ''),
+            'dir' => strtolower((string) ($query['dir'] ?? '')) === 'asc' ? 'asc' : 'desc',
+        ];
+    }
+
+    /** The raw row, straight from the module's own table, for the form and the detail page. */
+    public static function find(string $key, int $id, array $context = []): ?array
+    {
+        $module = Schema::get($key);
+        $alias = $module['alias'];
+        $conditions = ["{$alias}.id = ?"];
+        $parameters = [$id];
+
+        if (!empty($module['soft_delete'])) {
+            $conditions[] = "{$alias}.deleted_at IS NULL";
         }
 
-        self::$db = Database::connection();
-        return self::$db;
+        $scope = self::scopeCondition($module, $context);
+        $joins = $module['joins'] ?? '';
+        if ($scope !== null) {
+            $conditions[] = $scope[0];
+            $parameters[] = $scope[1];
+        }
+
+        $statement = self::db()->prepare(sprintf(
+            'SELECT %s.* FROM %s %s %s WHERE %s LIMIT 1',
+            $alias,
+            $module['table'],
+            $alias,
+            $scope !== null ? $joins : '',
+            implode(' AND ', $conditions)
+        ));
+        $statement->execute($parameters);
+        $row = $statement->fetch();
+
+        return $row === false ? null : $row;
     }
 
-    public static function fieldOptions(string $key, string $column): array
+    /** The human reference of a record, used in headings, audit entries and flash messages. */
+    public static function code(string $key, array $record): string
     {
-        return match (true) {
-            $key === 'vehicles' && $column === 'Assigned driver' => array_merge(['None'], self::columnValues('drivers', 'full_name')),
-            $key === 'drivers' && $column === 'Assigned vehicle' => array_merge(['None'], self::columnValues('vehicles', 'plate_number')),
-            in_array($column, ['Vehicle'], true) && $key !== 'vehicles' => self::columnValues('vehicles', 'plate_number'),
-            $column === 'Driver' => self::columnValues('drivers', 'full_name'),
-            in_array($column, ['Requester', 'Submitted by', 'Requested by'], true) => self::columnValues('users', 'full_name'),
-            $column === 'Trip' => self::columnValues('trips', 'reference_code'),
-            $column === 'Warehouse' => self::columnValues('warehouses', 'warehouse_name'),
-            $column === 'Supplier' => self::columnValues('suppliers', 'supplier_name'),
-            $column === 'Role' => self::columnValues('roles', 'role_name'),
-            $column === 'Privilege' => array_values(self::PRIVILEGES),
-            $column === 'Department' => ['Operations', 'Fleet', 'Warehouse', 'Finance', 'Management', 'Administration'],
-            $column === 'Category' => ['Fuel', 'Toll', 'Repair', 'Allowance', 'Parking', 'Insurance'],
-            $column === 'Priority' => ['Urgent', 'High', 'Normal', 'Low'],
-            $column === 'Status' => self::statusOptions($key),
-            default => [],
-        };
+        $module = Schema::get($key);
+
+        return (string) ($record[$module['code']] ?? ('#' . ($record['id'] ?? '')));
     }
 
-    public static function module(string $key): array
+    /** Field values already resolved for display: relations become names, enums become labels. */
+    public static function display(string $key, array $record): array
     {
-        $module = self::definition($key);
-        $module['rows'] = self::rows($key);
-        return $module;
+        $module = Schema::get($key);
+        $display = [];
+
+        foreach ($module['fields'] as $name => $field) {
+            $value = $record[$name] ?? null;
+            $display[$name] = match ($field['type']) {
+                'relation' => self::relationLabel($field, $value),
+                'select' => (string) ($field['options'][$value] ?? ($value === null ? '' : Schema::label((string) $value))),
+                'checkbox' => ((int) $value === 1 ? 'Yes' : 'No'),
+                default => $value === null ? '' : (string) $value,
+            };
+        }
+
+        return $display;
     }
 
-    public static function find(string $key, string $id): ?array
+    /** Child rows (trip stops, invoice lines, maintenance parts) for the detail page. */
+    public static function lines(string $key, int $parentId): array
     {
-        foreach (self::rows($key) as $row) {
-            if ((string) $row[0] === $id) {
-                return $row;
+        $module = Schema::get($key);
+        if (!isset($module['lines'])) {
+            return [];
+        }
+
+        $lines = $module['lines'];
+        $order = $lines['sequence'] ?? 'id';
+        $statement = self::db()->prepare("SELECT * FROM {$lines['table']} WHERE {$lines['parent']} = ? ORDER BY {$order}, id");
+        $statement->execute([$parentId]);
+
+        return $statement->fetchAll();
+    }
+
+    /** Related record blocks shown under a detail page. */
+    public static function related(string $key, int $id, string $roleKey): array
+    {
+        $module = Schema::get($key);
+        $blocks = [];
+
+        foreach ($module['related'] as $block) {
+            $permission = $block['permission'] ?? $key;
+            if (!Permission::allows($roleKey, $permission, 'view')) {
+                continue;
             }
+
+            try {
+                $statement = self::db()->prepare($block['sql']);
+                $statement->execute(['id' => $id]);
+                $block['rows'] = $statement->fetchAll();
+            } catch (\Throwable) {
+                $block['rows'] = [];
+            }
+
+            $blocks[] = $block;
         }
 
-        return null;
+        return $blocks;
     }
 
-    public static function validate(string $key, array $values, array $files = []): array
+    /** Audit entries for one record, newest first, shown as a timeline on the detail page. */
+    public static function history(string $key, string $code, int $limit = 20): array
     {
-        $definition = self::definition($key);
+        $statement = self::db()->prepare(
+            'SELECT a.action_name, a.reason, a.metadata, a.created_at, COALESCE(u.full_name, "System") AS actor
+               FROM audit_logs a
+               LEFT JOIN users u ON u.id = a.user_id
+              WHERE a.entity_type = ? AND a.entity_id = ?
+              ORDER BY a.id DESC
+              LIMIT ' . max(1, $limit)
+        );
+        $statement->execute([$key, $code]);
+
+        return $statement->fetchAll();
+    }
+
+    /** Options for a relation or select field, for the form and the filter bar. */
+    public static function options(string $key, string $fieldName): array
+    {
+        $field = Schema::get($key)['fields'][$fieldName] ?? null;
+        if ($field === null) {
+            return [];
+        }
+
+        if ($field['type'] === 'select') {
+            return $field['options'] ?? [];
+        }
+
+        if ($field['type'] !== 'relation') {
+            return [];
+        }
+
+        return self::relationOptions($field['relation']);
+    }
+
+    /** @return array<int|string, string> */
+    public static function relationOptions(array $relation): array
+    {
+        $table = $relation['table'];
+        $labelColumn = $relation['label'];
+        if (!self::relationAllowed($table, $labelColumn)) {
+            return [];
+        }
+
+        $where = $relation['where'] ?? '';
+        $sql = "SELECT id, {$labelColumn} AS label FROM {$table}";
+        if ($where !== '') {
+            $sql .= " WHERE {$where}";
+        }
+        $sql .= " ORDER BY {$labelColumn}";
+
+        $options = [];
+        foreach (self::db()->query($sql)->fetchAll() as $row) {
+            $options[(int) $row['id']] = (string) $row['label'];
+        }
+
+        return $options;
+    }
+
+    // --------------------------------------------------------------- writing
+
+    /**
+     * Server-side validation for one submitted record.
+     *
+     * @return list<string> messages; an empty list means the record may be saved
+     */
+    public static function validate(string $key, array $input, array $files = [], ?int $id = null): array
+    {
+        $module = Schema::get($key);
         $errors = [];
 
-        foreach ($definition['columns'] as $index => $column) {
-            $value = trim((string) ($values[$index] ?? ''));
-            if (self::isRequiredColumn($key, $column) && $value === '') {
-                $errors[] = "{$column} is required.";
+        foreach (Schema::editableFields($key) as $name => $field) {
+            $value = trim((string) ($input[$name] ?? ''));
+            $label = $field['label'];
+
+            if ($field['type'] === 'checkbox' || $field['type'] === 'file') {
                 continue;
             }
 
-            $options = self::fieldOptions($key, $column);
-            if ($value !== '' && $options !== [] && !in_array($value, $options, true)) {
-                $errors[] = "{$column} has an invalid value.";
+            if ($value === '') {
+                if (!empty($field['required']) && empty($field['auto'])) {
+                    $errors[] = "{$label} is required.";
+                }
+                continue;
             }
 
-            if ($value !== '' && self::isNumericColumn($column) && !is_numeric(str_replace(',', '', $value))) {
-                $errors[] = "{$column} must be numeric.";
-            }
+            switch ($field['type']) {
+                case 'select':
+                    if (!array_key_exists($value, array_change_key_case($field['options'] ?? [], CASE_LOWER)) && !array_key_exists($value, $field['options'] ?? [])) {
+                        $errors[] = "{$label} is not one of the allowed values.";
+                    }
+                    break;
 
-            if ($value !== '' && self::isDateColumn($column) && strtotime($value) === false) {
-                $errors[] = "{$column} must be a valid date or date/time.";
+                case 'relation':
+                    if (!self::relationExists($field['relation'], $value)) {
+                        $errors[] = "{$label} points at a record that does not exist.";
+                    }
+                    break;
+
+                case 'number':
+                case 'decimal':
+                case 'money':
+                    $numeric = str_replace(',', '', $value);
+                    if (!is_numeric($numeric)) {
+                        $errors[] = "{$label} must be a number.";
+                        break;
+                    }
+                    if (isset($field['min']) && (float) $numeric < (float) $field['min']) {
+                        $errors[] = "{$label} cannot be below {$field['min']}.";
+                    }
+                    if (isset($field['max']) && (float) $numeric > (float) $field['max']) {
+                        $errors[] = "{$label} cannot be above {$field['max']}.";
+                    }
+                    if ($field['type'] !== 'number' && (float) $numeric < 0 && !in_array($name, ['temperature_min_c', 'temperature_max_c'], true)) {
+                        $errors[] = "{$label} cannot be negative.";
+                    }
+                    break;
+
+                case 'date':
+                case 'datetime':
+                    if (strtotime($value) === false) {
+                        $errors[] = "{$label} is not a valid date.";
+                    }
+                    break;
+
+                case 'email':
+                    if (filter_var($value, FILTER_VALIDATE_EMAIL) === false) {
+                        $errors[] = "{$label} is not a valid email address.";
+                    }
+                    break;
             }
         }
 
-        foreach (self::fileColumns($key) as $index => $column) {
-            $field = 'field_' . $index;
-            if (!isset($files[$field]) || ($files[$field]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+        foreach (self::fileFields($key) as $name => $field) {
+            $error = self::validateUpload($files['file_' . $name] ?? null, $field['label']);
+            if ($error !== null) {
+                $errors[] = $error;
+            }
+        }
+
+        $errors = array_merge($errors, self::businessRules($key, $module, $input, $id));
+
+        return array_values(array_unique($errors));
+    }
+
+    /**
+     * Every uniqueness rule the table itself declares, checked before the insert
+     * and reported against the field the person actually filled in.
+     *
+     * Reading the indexes rather than listing them by hand means a new unique
+     * column is covered the day it is added, and — more importantly — the person
+     * is told *which* box to change. A bare "that reference is already used"
+     * leaves them guessing which of fourteen fields it meant.
+     *
+     * @return list<string>
+     */
+    private static function uniquenessErrors(array $module, array $input, ?int $id): array
+    {
+        $errors = [];
+
+        foreach (self::uniqueIndexes($module['table']) as $columns) {
+            // Only a rule the form can actually satisfy is worth reporting.
+            $editable = array_filter($columns, static fn (string $c): bool => isset($module['fields'][$c]));
+            if (count($editable) !== count($columns)) {
                 continue;
             }
 
-            if (($files[$field]['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
-                $errors[] = "{$column} could not be uploaded.";
+            $values = [];
+            foreach ($columns as $column) {
+                $field = $module['fields'][$column];
+                $raw = trim((string) ($input[$column] ?? ''));
+
+                // A blank auto reference is generated at save time, and a blank
+                // optional column is NULL, which never collides.
+                if ($raw === '') {
+                    continue 2;
+                }
+
+                $values[$column] = $field['type'] === 'relation' ? (int) $raw : $raw;
+            }
+
+            if (!self::rowExists($module['table'], $values, $id)) {
                 continue;
             }
 
-            if (($files[$field]['size'] ?? 0) > 5 * 1024 * 1024) {
-                $errors[] = "{$column} must be 5 MB or smaller.";
+            $described = [];
+            foreach ($values as $column => $stored) {
+                $field = $module['fields'][$column];
+                $shown = $field['type'] === 'relation'
+                    ? self::relationLabel($field, $stored)
+                    : (string) ($field['options'][$stored] ?? $stored);
+                $described[] = sprintf('%s "%s"', $field['label'], $shown);
             }
 
-            $extension = strtolower(pathinfo((string) $files[$field]['name'], PATHINFO_EXTENSION));
-            if (!in_array($extension, ['pdf', 'png', 'jpg', 'jpeg', 'doc', 'docx', 'xls', 'xlsx'], true)) {
-                $errors[] = "{$column} must be a PDF, image, Word, or Excel file.";
+            $errors[] = count($described) === 1
+                ? $described[0] . ' is already used by another record. Change it to something not yet taken.'
+                : 'These values are already used together by another record: ' . implode(' and ', $described) . '.';
+        }
+
+        return $errors;
+    }
+
+    /**
+     * Unique indexes on a table, as a list of column lists. The primary key is
+     * left out: it is the record's own identity, not a rule a person can break.
+     *
+     * @var array<string, list<list<string>>>
+     */
+    private static array $uniqueIndexes = [];
+
+    /** @return list<list<string>> */
+    private static function uniqueIndexes(string $table): array
+    {
+        if (isset(self::$uniqueIndexes[$table])) {
+            return self::$uniqueIndexes[$table];
+        }
+
+        $statement = self::db()->prepare(
+            "SELECT INDEX_NAME, COLUMN_NAME
+               FROM information_schema.STATISTICS
+              WHERE TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = ?
+                AND NON_UNIQUE = 0
+                AND INDEX_NAME <> 'PRIMARY'
+              ORDER BY INDEX_NAME, SEQ_IN_INDEX"
+        );
+        $statement->execute([$table]);
+
+        $byIndex = [];
+        foreach ($statement->fetchAll() as $row) {
+            $byIndex[(string) $row['INDEX_NAME']][] = (string) $row['COLUMN_NAME'];
+        }
+
+        // MySQL often carries the same column under two index names; one check
+        // per set of columns is enough, and two identical messages are noise.
+        $seen = [];
+        $unique = [];
+        foreach ($byIndex as $columns) {
+            $signature = implode('|', $columns);
+            if (isset($seen[$signature])) {
+                continue;
+            }
+            $seen[$signature] = true;
+            $unique[] = $columns;
+        }
+
+        return self::$uniqueIndexes[$table] = $unique;
+    }
+
+    /** Is there already a row carrying these column values, other than this one? */
+    private static function rowExists(string $table, array $values, ?int $id): bool
+    {
+        // Column names come from information_schema, never from the request.
+        $conditions = [];
+        $parameters = [];
+        foreach ($values as $column => $value) {
+            $conditions[] = "`{$column}` = ?";
+            $parameters[] = $value;
+        }
+
+        if ($id !== null) {
+            $conditions[] = 'id <> ?';
+            $parameters[] = $id;
+        }
+
+        $statement = self::db()->prepare(
+            sprintf('SELECT COUNT(*) FROM `%s` WHERE %s', $table, implode(' AND ', $conditions))
+        );
+        $statement->execute($parameters);
+
+        return (int) $statement->fetchColumn() > 0;
+    }
+
+    /** Rules that need more than one field, or a look at the database. */
+    private static function businessRules(string $key, array $module, array $input, ?int $id): array
+    {
+        $errors = [];
+        $value = static fn (string $name): string => trim((string) ($input[$name] ?? ''));
+
+        $errors = array_merge($errors, self::uniquenessErrors($module, $input, $id));
+
+        if ($key === 'trips') {
+            $plannedOut = $value('planned_departure_at');
+            $plannedIn = $value('planned_arrival_at');
+            if ($plannedOut !== '' && $plannedIn !== '' && strtotime($plannedIn) < strtotime($plannedOut)) {
+                $errors[] = 'Planned arrival cannot be before planned departure.';
+            }
+            $out = $value('departure_at');
+            $in = $value('arrival_at');
+            if ($out !== '' && $in !== '' && strtotime($in) < strtotime($out)) {
+                $errors[] = 'Actual arrival cannot be before actual departure.';
+            }
+        }
+
+        if ($key === 'shipments') {
+            $min = $value('temperature_min_c');
+            $max = $value('temperature_max_c');
+            if ($min !== '' && $max !== '' && (float) $max < (float) $min) {
+                $errors[] = 'Maximum temperature cannot be below the minimum temperature.';
+            }
+            if ($value('cargo_type') === 'cold_chain' && $min === '' && $max === '') {
+                $errors[] = 'Cold-chain cargo needs a temperature range.';
+            }
+        }
+
+        if ($key === 'fuel') {
+            $now = $value('mileage');
+            $vehicleId = $value('vehicle_id');
+            if ($now !== '' && $vehicleId !== '') {
+                $previous = self::lastOdometer((int) $vehicleId, $id);
+                if ($previous !== null && (int) $now < $previous) {
+                    $errors[] = sprintf('Odometer %s is below the previous reading of %s km for this vehicle.', $now, number_format($previous));
+                }
+            }
+        }
+
+        if ($key === 'invoices') {
+            $issue = $value('issue_date');
+            $due = $value('due_date');
+            if ($issue !== '' && $due !== '' && strtotime($due) < strtotime($issue)) {
+                $errors[] = 'The due date cannot be before the issue date.';
+            }
+        }
+
+        if ($key === 'rates') {
+            $fromDate = $value('effective_from');
+            $toDate = $value('effective_to');
+            if ($fromDate !== '' && $toDate !== '' && strtotime($toDate) < strtotime($fromDate)) {
+                $errors[] = 'The rate cannot expire before it becomes effective.';
+            }
+        }
+
+        if ($key === 'movements' && $value('movement_type') !== '' && $value('item_id') !== '') {
+            $quantity = (float) str_replace(',', '', $value('quantity'));
+            if (!Schema::movementAdds($value('movement_type'))) {
+                $balance = (float) self::scalar('SELECT quantity FROM inventory_items WHERE id = ?', [(int) $value('item_id')]);
+                if ($quantity > $balance) {
+                    $errors[] = sprintf('Only %s is on hand; this movement would take the balance below zero.', rtrim(rtrim(number_format($balance, 2, '.', ''), '0'), '.'));
+                }
             }
         }
 
         return $errors;
     }
 
-    public static function save(string $key, ?string $id, array $values, array $files = []): string
+    /**
+     * Inserts or updates one record and returns its id.
+     * Uploads, auto references and derived columns are handled here.
+     */
+    public static function save(string $key, ?int $id, array $input, array $files = []): int
     {
-        $values = array_values($values);
-        $publicId = match ($key) {
-            'vehicles' => self::saveVehicle($id, $values),
-            'drivers' => self::saveDriver($id, $values),
-            'trips' => self::saveTrip($id, $values),
-            'requests' => self::saveRequest($id, $values),
-            'deliveries' => self::saveDelivery($id, $values, $files),
-            'fuel' => self::saveFuel($id, $values, $files),
-            'expenses' => self::saveExpense($id, $values),
-            'warehouse' => self::saveInventoryItem($id, $values),
-            'maintenance' => self::saveMaintenance($id, $values),
-            'procurement' => self::savePurchaseRequest($id, $values),
-            'users' => self::saveUser($id, $values),
-            'reports' => self::saveReport($id, $values),
-            default => throw new \InvalidArgumentException('Unknown module.'),
-        };
+        $module = Schema::get($key);
+        $columns = [];
 
-        AuditLog::record($id === null ? 'record.created' : 'record.updated', $key, $publicId);
-        return $publicId;
+        foreach (Schema::editableFields($key) as $name => $field) {
+            if ($field['type'] === 'file') {
+                $uploaded = self::storeUpload($key, $name, $files, (string) ($input['existing_' . $name] ?? ''));
+                $columns[$name] = $uploaded === '' ? null : $uploaded;
+                continue;
+            }
+
+            if ($field['type'] === 'checkbox') {
+                $columns[$name] = isset($input[$name]) && $input[$name] !== '' && $input[$name] !== '0' ? 1 : 0;
+                continue;
+            }
+
+            $value = trim((string) ($input[$name] ?? ''));
+
+            if ($value === '' && !empty($field['auto'])) {
+                $value = Reference::next($field['auto'], $module['table'], $name);
+            }
+
+            $columns[$name] = match ($field['type']) {
+                'number' => $value === '' ? null : (int) str_replace(',', '', $value),
+                'decimal', 'money' => $value === '' ? null : (float) str_replace(',', '', $value),
+                'relation' => $value === '' ? null : (int) $value,
+                'date' => $value === '' ? null : date('Y-m-d', (int) strtotime($value)),
+                'datetime' => $value === '' ? null : date('Y-m-d H:i:s', (int) strtotime($value)),
+                default => $value === '' ? null : $value,
+            };
+        }
+
+        $columns = self::derive($key, $columns, $id);
+        $columns = self::respectNotNull($module['table'], $columns);
+
+        $db = self::db();
+        $owning = !$db->inTransaction();
+        if ($owning) {
+            $db->beginTransaction();
+        }
+
+        try {
+            if ($id === null) {
+                $names = array_keys($columns);
+                $placeholders = implode(', ', array_fill(0, count($names), '?'));
+                $sql = sprintf('INSERT INTO %s (%s) VALUES (%s)', $module['table'], implode(', ', $names), $placeholders);
+                $statement = $db->prepare($sql);
+                $statement->execute(array_values($columns));
+                $id = (int) $db->lastInsertId();
+            } else {
+                $assignments = implode(', ', array_map(static fn (string $name): string => "{$name} = ?", array_keys($columns)));
+                $sql = sprintf('UPDATE %s SET %s WHERE id = ?', $module['table'], $assignments);
+                $statement = $db->prepare($sql);
+                $statement->execute([...array_values($columns), $id]);
+            }
+
+            self::afterSave($key, $id, $columns);
+
+            if ($owning) {
+                $db->commit();
+            }
+        } catch (\Throwable $exception) {
+            if ($owning && $db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $exception;
+        }
+
+        $record = self::find($key, $id) ?? $columns;
+        AuditLog::record($id === null ? 'record.created' : 'record.updated', $key, self::code($key, $record));
+
+        return $id;
     }
 
-    public static function delete(string $key, string $id, string $reason = ''): void
+    /**
+     * A blank optional field becomes NULL, but some of those columns are NOT NULL
+     * with a database default (fuel type, ownership, unit of measure). Writing
+     * NULL into them fails, so fall back to the column's own default and drop the
+     * column entirely when it has none.
+     *
+     * @var array<string, array<string, array{nullable: bool, default: ?string}>>
+     */
+    private static array $columnMeta = [];
+
+    private static function respectNotNull(string $table, array $columns): array
     {
-        [$table, $column] = self::deleteTarget($key);
-        $statement = self::db()->prepare("DELETE FROM {$table} WHERE {$column} = ?");
-        $statement->execute([$id]);
-        AuditLog::record('record.deleted', $key, $id, $reason);
+        $meta = self::columnMeta($table);
+
+        foreach ($columns as $name => $value) {
+            if ($value !== null || ($meta[$name]['nullable'] ?? true)) {
+                continue;
+            }
+
+            $default = $meta[$name]['default'] ?? null;
+            if ($default === null) {
+                unset($columns[$name]);
+                continue;
+            }
+
+            $columns[$name] = $default;
+        }
+
+        return $columns;
     }
 
-    public static function setStatus(string $key, string $id, int $status): void
+    /** @return array<string, array{nullable: bool, default: ?string}> */
+    private static function columnMeta(string $table): array
     {
-        $target = self::statusTarget($key);
-        if ($target === null) {
+        if (isset(self::$columnMeta[$table])) {
+            return self::$columnMeta[$table];
+        }
+
+        $statement = self::db()->prepare(
+            'SELECT COLUMN_NAME, IS_NULLABLE, COLUMN_DEFAULT
+               FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?'
+        );
+        $statement->execute([$table]);
+
+        $meta = [];
+        foreach ($statement->fetchAll() as $column) {
+            $default = $column['COLUMN_DEFAULT'];
+            // MariaDB quotes string defaults in information_schema.
+            if (is_string($default)) {
+                $default = trim($default, "'");
+                if (strcasecmp($default, 'NULL') === 0) {
+                    $default = null;
+                }
+            }
+
+            $meta[(string) $column['COLUMN_NAME']] = [
+                'nullable' => strcasecmp((string) $column['IS_NULLABLE'], 'YES') === 0,
+                'default' => $default,
+            ];
+        }
+
+        return self::$columnMeta[$table] = $meta;
+    }
+
+    /** Values the user does not type but that must still be right. */
+    private static function derive(string $key, array $columns, ?int $id): array
+    {
+        if ($key === 'vehicle_documents' && !empty($columns['expires_on'])) {
+            $days = (int) floor((strtotime($columns['expires_on']) - strtotime(date('Y-m-d'))) / 86400);
+            if (($columns['status'] ?? '') !== 'cancelled') {
+                $columns['status'] = $days < 0 ? 'expired' : ($days <= Settings::int('document_alert_days', 30) ? 'expiring' : 'valid');
+            }
+        }
+
+        if ($key === 'fuel' && !empty($columns['vehicle_id'])) {
+            $columns['previous_mileage'] = self::lastOdometer((int) $columns['vehicle_id'], $id);
+        }
+
+        if ($key === 'invoices') {
+            $columns['tax_rate'] ??= Settings::float('tax_rate', 18.0);
+        }
+
+        if ($key === 'warehouse' && $id === null) {
+            $columns['status'] = self::stockStatus((float) ($columns['quantity'] ?? 0), (float) ($columns['minimum_level'] ?? 0));
+        }
+
+        if ($key === 'users' && \current_prvg() !== 1) {
+            unset($columns['prvg']);
+        }
+
+        if ($key === 'users' && $id === null) {
+            // A new account needs a password, and nobody should choose it for
+            // someone else. Generate a one-time one, force a change at first
+            // sign-in, and hand the plain value back for the administrator to
+            // pass on; it is never stored anywhere in plain text.
+            self::$lastOneTimePassword = self::oneTimePassword();
+            $columns['password_hash'] = password_hash(self::$lastOneTimePassword, PASSWORD_DEFAULT);
+            $columns['must_change_password'] = 1;
+            $columns['password_changed_at'] = null;
+        }
+
+        return $columns;
+    }
+
+    /** Set when a user record is created, so the controller can show it once. */
+    private static ?string $lastOneTimePassword = null;
+
+    public static function takeOneTimePassword(): ?string
+    {
+        $password = self::$lastOneTimePassword;
+        self::$lastOneTimePassword = null;
+
+        return $password;
+    }
+
+    /** Readable but not guessable: two words, a separator and four digits. */
+    private static function oneTimePassword(): string
+    {
+        $words = ['Kigali', 'Huye', 'Musanze', 'Rubavu', 'Nyagatare', 'Muhanga', 'Karongi', 'Rwamagana'];
+        $second = ['Fresh', 'Route', 'Cargo', 'Depot', 'Fleet', 'Transit', 'Convoy', 'Pallet'];
+
+        return $words[random_int(0, count($words) - 1)]
+            . $second[random_int(0, count($second) - 1)]
+            . random_int(1000, 9999);
+    }
+
+    /** Side effects that keep other tables in step with this one. */
+    private static function afterSave(string $key, int $id, array $columns): void
+    {
+        $db = self::db();
+
+        if ($key === 'vehicles' && !empty($columns['assigned_driver_id'])) {
+            // A driver holds one vehicle at a time.
+            $release = $db->prepare('UPDATE vehicles SET assigned_driver_id = NULL WHERE assigned_driver_id = ? AND id <> ?');
+            $release->execute([(int) $columns['assigned_driver_id'], $id]);
+        }
+
+        if ($key === 'fuel' && !empty($columns['vehicle_id']) && !empty($columns['mileage'])) {
+            $bump = $db->prepare('UPDATE vehicles SET mileage = GREATEST(mileage, ?) WHERE id = ?');
+            $bump->execute([(int) $columns['mileage'], (int) $columns['vehicle_id']]);
+        }
+
+        if ($key === 'maintenance' && ($columns['status'] ?? '') === 'in_progress' && !empty($columns['vehicle_id'])) {
+            $db->prepare("UPDATE vehicles SET status = 'maintenance' WHERE id = ? AND status = 'available'")
+               ->execute([(int) $columns['vehicle_id']]);
+        }
+
+        if ($key === 'warehouse') {
+            StockLedger::setBalance($id, (float) ($columns['quantity'] ?? 0));
+        }
+
+        if ($key === 'movements') {
+            // The movement row is already written; move the item balance with it.
+            StockLedger::recalculate((int) $columns['item_id']);
+        }
+
+        if ($key === 'invoices') {
+            self::recalculateInvoice($id);
+            Posting::tryPost('invoice', $id);
+        }
+
+        if ($key === 'fuel') {
+            Posting::tryPost('fuel', $id);
+        }
+
+        if ($key === 'payments' && !empty($columns['invoice_id'])) {
+            // The payment settles its invoice, and both sides reach the ledger.
+            self::recalculateInvoice((int) $columns['invoice_id']);
+            Posting::tryPost('payment', $id);
+            Posting::tryPost('invoice', (int) $columns['invoice_id']);
+        }
+    }
+
+    /** Replaces the child rows of a record (stops, invoice lines, parts) in one go. */
+    public static function saveLines(string $key, int $parentId, array $rows): void
+    {
+        $module = Schema::get($key);
+        if (!isset($module['lines'])) {
             return;
         }
 
-        [$table, $identityColumn, $statusColumn, $onValue, $offValue] = $target;
-        $statement = self::db()->prepare("UPDATE {$table} SET {$statusColumn} = ? WHERE {$identityColumn} = ?");
-        $statement->execute([$status === 1 ? $onValue : $offValue, $id]);
-        AuditLog::record('record.status_changed', $key, $id, null, ['status' => $status === 1 ? $onValue : $offValue]);
+        $lines = $module['lines'];
+        $columns = $lines['columns'];
+        $db = self::db();
+
+        $db->beginTransaction();
+        try {
+            $db->prepare("DELETE FROM {$lines['table']} WHERE {$lines['parent']} = ?")->execute([$parentId]);
+
+            $names = array_keys($columns);
+            $insertColumns = array_merge([$lines['parent']], $names);
+            if (isset($lines['sequence'])) {
+                $insertColumns[] = $lines['sequence'];
+            }
+            $placeholders = implode(', ', array_fill(0, count($insertColumns), '?'));
+            $insert = $db->prepare(sprintf('INSERT INTO %s (%s) VALUES (%s)', $lines['table'], implode(', ', $insertColumns), $placeholders));
+
+            $sequence = 0;
+            foreach ($rows as $row) {
+                $values = [$parentId];
+                $blank = true;
+                foreach ($names as $name) {
+                    $raw = trim((string) ($row[$name] ?? ''));
+                    if ($raw !== '') {
+                        $blank = false;
+                    }
+                    $values[] = match ($columns[$name]['type']) {
+                        'decimal', 'money' => $raw === '' ? 0 : (float) str_replace(',', '', $raw),
+                        'relation' => $raw === '' ? null : (int) $raw,
+                        'datetime' => $raw === '' ? null : date('Y-m-d H:i:s', (int) strtotime($raw)),
+                        default => $raw === '' ? null : $raw,
+                    };
+                }
+
+                if ($blank) {
+                    continue;
+                }
+
+                if (isset($lines['sequence'])) {
+                    $values[] = ++$sequence;
+                }
+
+                $insert->execute($values);
+            }
+
+            if (isset($lines['total_column'])) {
+                self::applyLineTotal($module, $lines, $parentId);
+            }
+
+            $db->commit();
+        } catch (\Throwable $exception) {
+            if ($db->inTransaction()) {
+                $db->rollBack();
+            }
+            throw $exception;
+        }
+
+        if ($key === 'invoices') {
+            self::recalculateInvoice($parentId);
+        }
+
+        AuditLog::record('record.lines_updated', $key, (string) $parentId, null, ['lines' => count($rows)]);
     }
 
-    public static function auditLog(): array
+    private static function applyLineTotal(array $module, array $lines, int $parentId): void
     {
-        $statement = self::db()->query(
-            'SELECT audit_logs.*, users.full_name
-             FROM audit_logs
-             LEFT JOIN users ON users.id = audit_logs.user_id
-             ORDER BY audit_logs.id DESC
-             LIMIT 20'
+        $total = (float) self::scalar(
+            "SELECT COALESCE(SUM(line_total), 0) FROM {$lines['table']} WHERE {$lines['parent']} = ?",
+            [$parentId]
         );
 
-        return array_map(static function (array $row): string {
-            $actor = $row['full_name'] ?: 'System';
-            return sprintf('%s - %s %s %s', $row['created_at'], $actor, $row['action_name'], $row['entity_id'] ?? '');
-        }, $statement->fetchAll());
+        $update = self::db()->prepare(sprintf('UPDATE %s SET %s = ? WHERE id = ?', $module['table'], $lines['total_column']));
+        $update->execute([$total, $parentId]);
     }
 
-    public static function isFileColumn(string $key, string $column): bool
+    public static function recalculateInvoice(int $invoiceId): void
     {
-        return in_array($column, array_values(self::fileColumns($key)), true);
+        $db = self::db();
+        $subtotal = (float) self::scalar('SELECT COALESCE(SUM(line_total), 0) FROM invoice_lines WHERE invoice_id = ?', [$invoiceId]);
+        $paid = (float) self::scalar('SELECT COALESCE(SUM(amount), 0) FROM payments WHERE invoice_id = ? AND deleted_at IS NULL', [$invoiceId]);
+
+        $invoice = $db->prepare('SELECT tax_rate, status, due_date FROM invoices WHERE id = ?');
+        $invoice->execute([$invoiceId]);
+        $row = $invoice->fetch();
+        if ($row === false) {
+            return;
+        }
+
+        $taxRate = (float) $row['tax_rate'];
+        $tax = round($subtotal * ($taxRate / 100), 2);
+        $total = round($subtotal + $tax, 2);
+
+        $status = (string) $row['status'];
+        if (!in_array($status, ['draft', 'cancelled'], true)) {
+            $status = match (true) {
+                $paid >= $total && $total > 0 => 'paid',
+                $paid > 0 => 'partially_paid',
+                $row['due_date'] < date('Y-m-d') => 'overdue',
+                default => 'issued',
+            };
+        }
+
+        $update = $db->prepare('UPDATE invoices SET subtotal = ?, tax_amount = ?, total_amount = ?, amount_paid = ?, status = ? WHERE id = ?');
+        $update->execute([$subtotal, $tax, $total, $paid, $status, $invoiceId]);
     }
 
-    public static function isRequiredColumn(string $key, string $column): bool
+    /**
+     * Soft delete. The row stays in the database with a `deleted_at` stamp so the
+     * audit trail and every report that already counted it keep working.
+     */
+    public static function remove(string $key, int $id, string $reason): void
     {
-        $definition = self::definition($key);
-        return in_array($column, $definition['required'] ?? [], true);
+        $module = Schema::get($key);
+        $record = self::find($key, $id);
+        if ($record === null) {
+            throw new \RuntimeException('That record was already removed.');
+        }
+
+        $code = self::code($key, $record);
+
+        if (empty($module['soft_delete'])) {
+            $itemId = $key === 'movements' ? (int) $record['item_id'] : null;
+            self::db()->prepare("DELETE FROM {$module['table']} WHERE id = ?")->execute([$id]);
+            if ($itemId !== null) {
+                StockLedger::recalculate($itemId);
+            }
+        } else {
+            self::db()->prepare("UPDATE {$module['table']} SET deleted_at = NOW() WHERE id = ?")->execute([$id]);
+        }
+
+        if (in_array($key, ['invoices', 'payments', 'fuel', 'expenses', 'maintenance', 'procurement'], true)) {
+            $source = $key === 'procurement' ? 'purchase' : rtrim($key, 's');
+            Posting::unpost($source, $id);
+            if ($key === 'payments' && !empty($record['invoice_id'])) {
+                self::recalculateInvoice((int) $record['invoice_id']);
+            }
+        }
+
+        AuditLog::record('record.deleted', $key, $code, $reason);
     }
 
-    public static function isDateColumn(string $column): bool
+    /** Flips a record between its two everyday statuses from the list switch. */
+    public static function toggleStatus(string $key, int $id, bool $on): string
     {
-        $lower = strtolower($column);
-        return str_contains($lower, 'date') ||
-            str_contains($lower, 'expiry') ||
-            str_contains($lower, 'service') ||
-            str_contains($lower, 'due') ||
-            str_contains($lower, ' at') ||
-            in_array($column, ['Pickup', 'Last login'], true);
-    }
-
-    public static function isNumericColumn(string $column): bool
-    {
-        return in_array($column, ['Amount', 'Litres', 'Unit price', 'Mileage', 'On hand', 'Minimum level', 'Unit cost', 'Estimated cost'], true);
-    }
-
-    private static function definition(string $key): array
-    {
-        $definitions = [
-            'vehicles' => ['title' => 'Vehicle Fleet', 'kicker' => 'Fleet registry', 'description' => 'Track vehicle health, assignment and availability in one place.', 'button' => 'Register vehicle', 'columns' => ['Vehicle', 'Type', 'Assigned driver', 'Status', 'Next service date'], 'required' => ['Vehicle', 'Type', 'Status']],
-            'trips' => ['title' => 'Trips and Deliveries', 'kicker' => 'Transport planning', 'description' => 'Move requests from approval to proof of delivery.', 'button' => 'Create trip', 'columns' => ['Reference', 'Pickup location', 'Destination', 'Departure at', 'Arrival at', 'Vehicle', 'Driver', 'Status'], 'required' => ['Reference', 'Pickup location', 'Destination', 'Departure at', 'Vehicle', 'Driver', 'Status']],
-            'drivers' => ['title' => 'Drivers', 'kicker' => 'People and compliance', 'description' => 'Manage driver availability, licenses, assignments and trip history.', 'button' => 'Add driver', 'columns' => ['Driver', 'License', 'Phone', 'Assigned vehicle', 'Status', 'License expiry date'], 'required' => ['Driver', 'License', 'Status', 'License expiry date']],
-            'maintenance' => ['title' => 'Maintenance', 'kicker' => 'Fleet health', 'description' => 'Schedule preventive work, repairs, spare parts and service providers.', 'button' => 'Create work order', 'columns' => ['Work order', 'Vehicle', 'Service', 'Provider', 'Priority', 'Estimated cost', 'Status', 'Due date', 'Completed at'], 'required' => ['Work order', 'Vehicle', 'Service', 'Priority', 'Estimated cost', 'Status', 'Due date']],
-            'requests' => ['title' => 'Transport requests', 'kicker' => 'Demand and approvals', 'description' => 'Review requests, approve routes and assign vehicles and drivers.', 'button' => 'New request', 'columns' => ['Request', 'Requester', 'Pickup location', 'Destination', 'Required date', 'Priority', 'Status', 'Notes'], 'required' => ['Request', 'Pickup location', 'Destination', 'Required date', 'Priority', 'Status']],
-            'fuel' => ['title' => 'Fuel management', 'kicker' => 'Consumption control', 'description' => 'Record fuel purchases, mileage and consumption by vehicle.', 'button' => 'Record fuel', 'columns' => ['Reference', 'Vehicle', 'Station', 'Litres', 'Unit price', 'Mileage', 'Purchased at', 'Receipt file'], 'required' => ['Reference', 'Vehicle', 'Station', 'Litres', 'Unit price', 'Mileage', 'Purchased at']],
-            'expenses' => ['title' => 'Logistics expenses', 'kicker' => 'Cost control', 'description' => 'Track fuel, repairs, allowances, tolls and cost per trip.', 'button' => 'Add expense', 'columns' => ['Reference', 'Category', 'Vehicle', 'Trip', 'Amount', 'Submitted by', 'Status', 'Expense date', 'Notes'], 'required' => ['Reference', 'Category', 'Amount', 'Status', 'Expense date']],
-            'warehouse' => ['title' => 'Warehouse & inventory', 'kicker' => 'Stock control', 'description' => 'Manage stock in, stock out, transfers and minimum stock alerts.', 'button' => 'Add item', 'columns' => ['Item', 'SKU', 'Warehouse', 'On hand', 'Minimum level', 'Unit cost', 'Status'], 'required' => ['Item', 'SKU', 'Warehouse', 'On hand', 'Minimum level', 'Unit cost', 'Status']],
-            'reports' => ['title' => 'Reports', 'kicker' => 'Insights and exports', 'description' => 'Review utilization, fuel, delivery, maintenance, driver and expense reports.', 'button' => 'Add report', 'columns' => ['Report', 'Period', 'Owner', 'Last generated', 'Format', 'Action'], 'required' => ['Report', 'Period', 'Owner', 'Format', 'Action']],
-            'deliveries' => ['title' => 'Deliveries', 'kicker' => 'Proof of delivery', 'description' => 'Monitor delivery progress, recipients, signatures and delivery documents.', 'button' => 'Create delivery', 'columns' => ['Delivery', 'Trip', 'Recipient', 'Destination', 'Status', 'Proof file', 'Signature file', 'Delivered at'], 'required' => ['Delivery', 'Recipient', 'Destination', 'Status']],
-            'procurement' => ['title' => 'Procurement', 'kicker' => 'Purchasing workflow', 'description' => 'Manage suppliers, quotations, purchase orders and goods received.', 'button' => 'New purchase request', 'columns' => ['Request', 'Description', 'Supplier', 'Amount', 'Requested by', 'Status'], 'required' => ['Request', 'Description', 'Amount', 'Status']],
-            'users' => ['title' => 'Users & permissions', 'kicker' => 'Access control', 'description' => 'Manage system users, roles, access permissions and account status.', 'button' => 'Add user', 'columns' => ['User', 'Email', 'Role', 'Department', 'Phone', 'Last login', 'Status', 'Privilege'], 'required' => ['User', 'Email', 'Role', 'Status']],
+        $targets = [
+            'vehicles' => ['available', 'inactive'],
+            'drivers' => ['available', 'inactive'],
+            'customers' => ['active', 'inactive'],
+            'suppliers' => ['active', 'inactive'],
+            'users' => ['active', 'inactive'],
+            'rates' => ['active', 'draft'],
+            'warehouse' => ['in_stock', 'out_of_stock'],
+            'shipments' => ['booked', 'cancelled'],
         ];
 
-        if (!isset($definitions[$key])) {
-            throw new \InvalidArgumentException('Unknown module.');
+        if (!isset($targets[$key])) {
+            throw new \RuntimeException('This record cannot be switched from the list; use its workflow buttons.');
         }
 
-        return $definitions[$key];
-    }
-
-    private static function rows(string $key): array
-    {
-        return match ($key) {
-            'vehicles' => self::fetchRows('SELECT v.plate_number, v.vehicle_type, COALESCE(d.full_name, "None") assigned_driver, v.status, v.next_service_date FROM vehicles v LEFT JOIN drivers d ON d.id = v.assigned_driver_id ORDER BY v.id', static fn ($row) => [$row['plate_number'], $row['vehicle_type'], $row['assigned_driver'], self::label($row['status']), self::formatDate($row['next_service_date'])]),
-            'drivers' => self::fetchRows('SELECT d.full_name, d.license_number, d.phone, COALESCE(v.plate_number, "None") assigned_vehicle, d.status, d.license_expiry FROM drivers d LEFT JOIN vehicles v ON v.assigned_driver_id = d.id ORDER BY d.id', static fn ($row) => [$row['full_name'], $row['license_number'], $row['phone'], $row['assigned_vehicle'], self::label($row['status']), self::formatDate($row['license_expiry'])]),
-            'trips' => self::fetchRows('SELECT t.reference_code, t.pickup_location, t.destination, t.departure_at, t.arrival_at, COALESCE(v.plate_number, "") vehicle, COALESCE(d.full_name, "") driver, t.status FROM trips t LEFT JOIN vehicles v ON v.id = t.vehicle_id LEFT JOIN drivers d ON d.id = t.driver_id ORDER BY t.id DESC', static fn ($row) => [$row['reference_code'], $row['pickup_location'], $row['destination'], self::formatDateTime($row['departure_at']), self::formatDateTime($row['arrival_at']), $row['vehicle'], $row['driver'], self::label($row['status'])]),
-            'requests' => self::fetchRows('SELECT r.reference_code, COALESCE(u.full_name, "") requester, r.pickup_location, r.destination, r.required_date, r.priority, r.status, r.notes FROM transport_requests r LEFT JOIN users u ON u.id = r.requester_id ORDER BY r.id DESC', static fn ($row) => [$row['reference_code'], $row['requester'], $row['pickup_location'], $row['destination'], self::formatDate($row['required_date']), self::label($row['priority']), self::label($row['status']), $row['notes']]),
-            'deliveries' => self::fetchRows('SELECT d.delivery_code, COALESCE(t.reference_code, "") trip, d.recipient_name, d.destination, d.status, d.proof_file, d.recipient_signature, d.delivered_at FROM deliveries d LEFT JOIN trips t ON t.id = d.trip_id ORDER BY d.id DESC', static fn ($row) => [$row['delivery_code'], $row['trip'], $row['recipient_name'], $row['destination'], self::label($row['status']), $row['proof_file'], $row['recipient_signature'], self::formatDateTime($row['delivered_at'])]),
-            'fuel' => self::fetchRows('SELECT f.id, f.reference_code, COALESCE(v.plate_number, "") vehicle, f.station_name, f.litres, f.unit_price, f.mileage, f.purchased_at, f.receipt_file FROM fuel_records f LEFT JOIN vehicles v ON v.id = f.vehicle_id ORDER BY f.id DESC', static fn ($row) => [$row['reference_code'] ?: 'FUE-' . str_pad((string) $row['id'], 4, '0', STR_PAD_LEFT), $row['vehicle'], $row['station_name'], self::decimal($row['litres']), self::decimal($row['unit_price']), (string) $row['mileage'], self::formatDateTime($row['purchased_at']), $row['receipt_file']]),
-            'expenses' => self::fetchRows('SELECT e.reference_code, e.category, COALESCE(v.plate_number, "") vehicle, COALESCE(t.reference_code, "") trip, e.amount, COALESCE(u.full_name, "") submitted_by, e.status, e.expense_date, e.notes FROM expenses e LEFT JOIN vehicles v ON v.id = e.vehicle_id LEFT JOIN trips t ON t.id = e.trip_id LEFT JOIN users u ON u.id = e.submitted_by ORDER BY e.id DESC', static fn ($row) => [$row['reference_code'], $row['category'], $row['vehicle'], $row['trip'], self::decimal($row['amount']), $row['submitted_by'], self::label($row['status']), self::formatDate($row['expense_date']), $row['notes']]),
-            'warehouse' => self::fetchRows('SELECT i.item_name, i.sku, w.warehouse_name, i.quantity, i.minimum_level, i.unit_cost, i.status FROM inventory_items i INNER JOIN warehouses w ON w.id = i.warehouse_id ORDER BY i.id DESC', static fn ($row) => [$row['item_name'], $row['sku'], $row['warehouse_name'], self::decimal($row['quantity']), self::decimal($row['minimum_level']), self::decimal($row['unit_cost']), self::label($row['status'])]),
-            'maintenance' => self::fetchRows('SELECT m.work_order_code, COALESCE(v.plate_number, "") vehicle, m.service_name, m.provider_name, m.priority, m.estimated_cost, m.status, m.due_date, m.completed_at FROM maintenance_orders m LEFT JOIN vehicles v ON v.id = m.vehicle_id ORDER BY m.id DESC', static fn ($row) => [$row['work_order_code'], $row['vehicle'], $row['service_name'], $row['provider_name'], self::label($row['priority']), self::decimal($row['estimated_cost']), self::label($row['status']), self::formatDate($row['due_date']), self::formatDateTime($row['completed_at'])]),
-            'procurement' => self::fetchRows('SELECT p.request_code, p.description, COALESCE(s.supplier_name, "") supplier, p.amount, COALESCE(u.full_name, "") requested_by, p.status FROM purchase_requests p LEFT JOIN suppliers s ON s.id = p.supplier_id LEFT JOIN users u ON u.id = p.requested_by ORDER BY p.id DESC', static fn ($row) => [$row['request_code'], $row['description'], $row['supplier'], self::decimal($row['amount']), $row['requested_by'], self::label($row['status'])]),
-            'users' => self::fetchRows('SELECT u.full_name, u.email, r.role_name, u.department, u.phone, u.last_login_at, u.status, u.prvg FROM users u INNER JOIN roles r ON r.id = u.role_id ORDER BY u.id DESC', static fn ($row) => [$row['full_name'], $row['email'], $row['role_name'], $row['department'], $row['phone'], self::formatDateTime($row['last_login_at']), self::label($row['status']), self::PRIVILEGES[(int) $row['prvg']] ?? self::PRIVILEGES[2]]),
-            'reports' => self::fetchRows('SELECT report_name, period_label, owner_name, last_generated_at, format_label, action_label FROM reports ORDER BY id', static fn ($row) => [$row['report_name'], $row['period_label'], $row['owner_name'], self::formatDateTime($row['last_generated_at']), $row['format_label'], $row['action_label']]),
-            default => [],
-        };
-    }
-
-    private static function saveVehicle(?string $id, array $values): string
-    {
-        $sql = $id === null
-            ? 'INSERT INTO vehicles (plate_number, vehicle_type, assigned_driver_id, status, next_service_date) VALUES (?, ?, ?, ?, ?)'
-            : 'UPDATE vehicles SET plate_number = ?, vehicle_type = ?, assigned_driver_id = ?, status = ?, next_service_date = ? WHERE plate_number = ?';
-        self::execute($sql, [$values[0], $values[1], self::idBy('drivers', 'full_name', $values[2] ?? ''), self::enum($values[3]), self::nullable($values[4] ?? ''), ...($id === null ? [] : [$id])]);
-        $driverId = self::idBy('drivers', 'full_name', $values[2] ?? '');
-        if ($driverId !== null) {
-            self::execute('UPDATE vehicles SET assigned_driver_id = NULL WHERE assigned_driver_id = ? AND plate_number <> ?', [$driverId, $values[0]]);
+        $module = Schema::get($key);
+        $record = self::find($key, $id);
+        if ($record === null) {
+            throw new \RuntimeException('That record no longer exists.');
         }
-        return $values[0];
+
+        $status = $on ? $targets[$key][0] : $targets[$key][1];
+        self::db()->prepare("UPDATE {$module['table']} SET status = ? WHERE id = ?")->execute([$status, $id]);
+
+        AuditLog::record('record.status_changed', $key, self::code($key, $record), null, ['status' => $status]);
+
+        return $status;
     }
 
-    private static function saveDriver(?string $id, array $values): string
+    // --------------------------------------------------------------- helpers
+
+    /** WHERE clause and bound values for a listing: soft delete, scope, search and filters. */
+    private static function conditions(array $module, array $query, array $context): array
     {
-        $sql = $id === null
-            ? 'INSERT INTO drivers (full_name, license_number, phone, status, license_expiry) VALUES (?, ?, ?, ?, ?)'
-            : 'UPDATE drivers SET full_name = ?, license_number = ?, phone = ?, status = ?, license_expiry = ? WHERE full_name = ?';
-        self::execute($sql, [$values[0], $values[1], self::nullable($values[2] ?? ''), self::enum($values[4]), self::nullable($values[5] ?? ''), ...($id === null ? [] : [$id])]);
-        $driverId = self::idBy('drivers', 'license_number', $values[1]);
-        if ($driverId !== null) {
-            self::execute('UPDATE vehicles SET assigned_driver_id = NULL WHERE assigned_driver_id = ?', [$driverId]);
-            if (!empty($values[3]) && $values[3] !== 'None') {
-                self::execute('UPDATE vehicles SET assigned_driver_id = ? WHERE plate_number = ?', [$driverId, $values[3]]);
+        $alias = $module['alias'];
+        $conditions = ['1 = 1'];
+        $parameters = [];
+
+        if (!empty($module['soft_delete'])) {
+            $conditions[] = "{$alias}.deleted_at IS NULL";
+        }
+
+        $scope = self::scopeCondition($module, $context);
+        if ($scope !== null) {
+            $conditions[] = $scope[0];
+            $parameters[] = $scope[1];
+        }
+
+        $search = trim((string) ($query['q'] ?? ''));
+        if ($search !== '' && !empty($module['search'])) {
+            $likes = [];
+            foreach ($module['search'] as $column) {
+                $likes[] = "{$column} LIKE ?";
+                $parameters[] = '%' . $search . '%';
+            }
+            $conditions[] = '(' . implode(' OR ', $likes) . ')';
+        }
+
+        foreach ($module['filters'] as $name => $filter) {
+            $value = trim((string) ($query[$name] ?? ''));
+            if ($value === '' || !array_key_exists($value, $filter['options'])) {
+                continue;
+            }
+            $conditions[] = "{$filter['column']} = ?";
+            $parameters[] = $value;
+        }
+
+        return [implode(' AND ', $conditions), $parameters];
+    }
+
+    /**
+     * Row-level scoping. A driver may only see the trips, deliveries and fuel that
+     * belong to their own driver profile; before this, every driver could open the
+     * whole company's operations.
+     *
+     * @return array{0: string, 1: int}|null
+     */
+    private static function scopeCondition(array $module, array $context): ?array
+    {
+        if (($context['role'] ?? '') !== 'driver' || empty($module['scope']['driver'])) {
+            return null;
+        }
+
+        $driverId = $context['driver_id'] ?? null;
+
+        // A login with no driver profile gets an impossible id rather than everything.
+        return [$module['scope']['driver'] . ' = ?', $driverId === null ? 0 : (int) $driverId];
+    }
+
+    private static function order(array $module, string $sort, string $dir): string
+    {
+        $default = $module['order'];
+        if ($sort === '') {
+            return $default;
+        }
+
+        $sortable = array_keys($module['list']);
+        if (!in_array($sort, $sortable, true)) {
+            return $default;
+        }
+
+        return sprintf('`%s` %s', $sort, strtolower($dir) === 'asc' ? 'ASC' : 'DESC');
+    }
+
+    private static function activeFilters(array $module, array $query): array
+    {
+        $active = [];
+        foreach ($module['filters'] as $name => $filter) {
+            $value = trim((string) ($query[$name] ?? ''));
+            if ($value !== '' && array_key_exists($value, $filter['options'])) {
+                $active[$name] = $value;
             }
         }
-        return $values[0];
+
+        return $active;
     }
 
-    private static function saveTrip(?string $id, array $values): string
+    /** @return array<string, array> */
+    public static function fileFields(string $key): array
     {
-        $sql = $id === null
-            ? 'INSERT INTO trips (reference_code, pickup_location, destination, departure_at, arrival_at, vehicle_id, driver_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-            : 'UPDATE trips SET reference_code = ?, pickup_location = ?, destination = ?, departure_at = ?, arrival_at = ?, vehicle_id = ?, driver_id = ?, status = ? WHERE reference_code = ?';
-        self::execute($sql, [$values[0], $values[1], $values[2], self::nullable($values[3] ?? ''), self::nullable($values[4] ?? ''), self::idBy('vehicles', 'plate_number', $values[5] ?? ''), self::idBy('drivers', 'full_name', $values[6] ?? ''), self::enum($values[7]), ...($id === null ? [] : [$id])]);
-        return $values[0];
+        return array_filter(Schema::fields($key), static fn (array $field): bool => $field['type'] === 'file');
     }
 
-    private static function saveRequest(?string $id, array $values): string
+    private static function validateUpload(?array $file, string $label): ?string
     {
-        $sql = $id === null
-            ? 'INSERT INTO transport_requests (reference_code, requester_id, pickup_location, destination, required_date, priority, status, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-            : 'UPDATE transport_requests SET reference_code = ?, requester_id = ?, pickup_location = ?, destination = ?, required_date = ?, priority = ?, status = ?, notes = ? WHERE reference_code = ?';
-        self::execute($sql, [$values[0], self::idBy('users', 'full_name', $values[1] ?? ''), $values[2], $values[3], $values[4], self::enum($values[5]), self::enum($values[6]), self::nullable($values[7] ?? ''), ...($id === null ? [] : [$id])]);
-        return $values[0];
-    }
-
-    private static function saveDelivery(?string $id, array $values, array $files): string
-    {
-        $proof = self::uploadedPath('deliveries', 5, $files, $values[5] ?? '');
-        $signature = self::uploadedPath('deliveries', 6, $files, $values[6] ?? '');
-        $sql = $id === null
-            ? 'INSERT INTO deliveries (delivery_code, trip_id, recipient_name, destination, status, proof_file, recipient_signature, delivered_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-            : 'UPDATE deliveries SET delivery_code = ?, trip_id = ?, recipient_name = ?, destination = ?, status = ?, proof_file = ?, recipient_signature = ?, delivered_at = ? WHERE delivery_code = ?';
-        self::execute($sql, [$values[0], self::idBy('trips', 'reference_code', $values[1] ?? ''), $values[2], $values[3], self::enum($values[4]), self::nullable($proof), self::nullable($signature), self::nullable($values[7] ?? ''), ...($id === null ? [] : [$id])]);
-        return $values[0];
-    }
-
-    private static function saveFuel(?string $id, array $values, array $files): string
-    {
-        $receipt = self::uploadedPath('fuel', 7, $files, $values[7] ?? '');
-        $sql = $id === null
-            ? 'INSERT INTO fuel_records (reference_code, vehicle_id, station_name, litres, unit_price, mileage, purchased_at, receipt_file) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-            : 'UPDATE fuel_records SET reference_code = ?, vehicle_id = ?, station_name = ?, litres = ?, unit_price = ?, mileage = ?, purchased_at = ?, receipt_file = ? WHERE reference_code = ?';
-        self::execute($sql, [$values[0], self::idBy('vehicles', 'plate_number', $values[1] ?? ''), $values[2], self::number($values[3]), self::number($values[4]), self::nullable($values[5] ?? ''), $values[6], self::nullable($receipt), ...($id === null ? [] : [$id])]);
-        return $values[0];
-    }
-
-    private static function saveExpense(?string $id, array $values): string
-    {
-        $sql = $id === null
-            ? 'INSERT INTO expenses (reference_code, category, vehicle_id, trip_id, amount, submitted_by, status, expense_date, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            : 'UPDATE expenses SET reference_code = ?, category = ?, vehicle_id = ?, trip_id = ?, amount = ?, submitted_by = ?, status = ?, expense_date = ?, notes = ? WHERE reference_code = ?';
-        self::execute($sql, [$values[0], $values[1], self::idBy('vehicles', 'plate_number', $values[2] ?? ''), self::idBy('trips', 'reference_code', $values[3] ?? ''), self::number($values[4]), self::idBy('users', 'full_name', $values[5] ?? ''), self::enum($values[6]), $values[7], self::nullable($values[8] ?? ''), ...($id === null ? [] : [$id])]);
-        return $values[0];
-    }
-
-    private static function saveInventoryItem(?string $id, array $values): string
-    {
-        $sql = $id === null
-            ? 'INSERT INTO inventory_items (item_name, sku, warehouse_id, quantity, minimum_level, unit_cost, status) VALUES (?, ?, ?, ?, ?, ?, ?)'
-            : 'UPDATE inventory_items SET item_name = ?, sku = ?, warehouse_id = ?, quantity = ?, minimum_level = ?, unit_cost = ?, status = ? WHERE item_name = ?';
-        self::execute($sql, [$values[0], $values[1], self::idBy('warehouses', 'warehouse_name', $values[2]), self::number($values[3]), self::number($values[4]), self::nullable($values[5] ?? ''), self::enum($values[6]), ...($id === null ? [] : [$id])]);
-        return $values[0];
-    }
-
-    private static function saveMaintenance(?string $id, array $values): string
-    {
-        $sql = $id === null
-            ? 'INSERT INTO maintenance_orders (work_order_code, vehicle_id, service_name, provider_name, priority, estimated_cost, status, due_date, completed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            : 'UPDATE maintenance_orders SET work_order_code = ?, vehicle_id = ?, service_name = ?, provider_name = ?, priority = ?, estimated_cost = ?, status = ?, due_date = ?, completed_at = ? WHERE work_order_code = ?';
-        self::execute($sql, [$values[0], self::idBy('vehicles', 'plate_number', $values[1]), $values[2], self::nullable($values[3] ?? ''), self::enum($values[4]), self::nullable($values[5] ?? ''), self::enum($values[6]), self::nullable($values[7] ?? ''), self::nullable($values[8] ?? ''), ...($id === null ? [] : [$id])]);
-        return $values[0];
-    }
-
-    private static function savePurchaseRequest(?string $id, array $values): string
-    {
-        $sql = $id === null
-            ? 'INSERT INTO purchase_requests (request_code, description, supplier_id, amount, requested_by, status) VALUES (?, ?, ?, ?, ?, ?)'
-            : 'UPDATE purchase_requests SET request_code = ?, description = ?, supplier_id = ?, amount = ?, requested_by = ?, status = ? WHERE request_code = ?';
-        self::execute($sql, [$values[0], $values[1], self::idBy('suppliers', 'supplier_name', $values[2] ?? ''), self::nullable($values[3] ?? ''), self::idBy('users', 'full_name', $values[4] ?? ''), self::enum($values[5]), ...($id === null ? [] : [$id])]);
-        return $values[0];
-    }
-
-    private static function saveUser(?string $id, array $values): string
-    {
-        $roleId = self::idBy('roles', 'role_name', $values[2]);
-        // Only a privileged user (prvg 1) may grant or change privileges; everyone else leaves it untouched (new users get 2).
-        $prvg = \current_prvg() === 1 ? (array_search($values[7] ?? '', self::PRIVILEGES, true) ?: 2) : null;
-        $params = [$values[0], $values[1], $roleId, self::nullable($values[3] ?? ''), self::nullable($values[4] ?? ''), self::nullable($values[5] ?? ''), self::enum($values[6])];
-        if ($id === null) {
-            $sql = 'INSERT INTO users (full_name, email, role_id, department, phone, last_login_at, status, prvg, password_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
-            $params[] = $prvg ?? 2;
-            $params[] = password_hash('password', PASSWORD_DEFAULT);
-        } else {
-            $sql = 'UPDATE users SET full_name = ?, email = ?, role_id = ?, department = ?, phone = ?, last_login_at = ?, status = ?' . ($prvg !== null ? ', prvg = ?' : '') . ' WHERE full_name = ?';
-            if ($prvg !== null) {
-                $params[] = $prvg;
-            }
-            $params[] = $id;
+        if ($file === null || ($file['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+            return null;
         }
-        self::execute($sql, $params);
-        return $values[0];
+
+        if (($file['error'] ?? UPLOAD_ERR_OK) !== UPLOAD_ERR_OK) {
+            return "{$label} could not be uploaded.";
+        }
+
+        if (($file['size'] ?? 0) > 5 * 1024 * 1024) {
+            return "{$label} must be 5 MB or smaller.";
+        }
+
+        $extension = strtolower(pathinfo((string) ($file['name'] ?? ''), PATHINFO_EXTENSION));
+        if (!in_array($extension, ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'doc', 'docx', 'xls', 'xlsx'], true)) {
+            return "{$label} must be a PDF, image, Word or Excel file.";
+        }
+
+        return null;
     }
 
-    private static function saveReport(?string $id, array $values): string
+    private static function storeUpload(string $key, string $fieldName, array $files, string $existing): string
     {
-        $sql = $id === null
-            ? 'INSERT INTO reports (report_name, period_label, owner_name, last_generated_at, format_label, action_label) VALUES (?, ?, ?, ?, ?, ?)'
-            : 'UPDATE reports SET report_name = ?, period_label = ?, owner_name = ?, last_generated_at = ?, format_label = ?, action_label = ? WHERE report_name = ?';
-        self::execute($sql, [$values[0], $values[1], $values[2], self::nullable($values[3] ?? ''), $values[4], $values[5], ...($id === null ? [] : [$id])]);
-        return $values[0];
+        $file = $files['file_' . $fieldName] ?? null;
+        if ($file === null || ($file['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+            return $existing;
+        }
+
+        $extension = strtolower(pathinfo((string) $file['name'], PATHINFO_EXTENSION));
+        $directory = dirname(__DIR__, 2) . '/storage/uploads/' . $key;
+        if (!is_dir($directory) && !mkdir($directory, 0775, true) && !is_dir($directory)) {
+            throw new \RuntimeException('The upload folder could not be created.');
+        }
+
+        $filename = date('Ymd-His') . '-' . bin2hex(random_bytes(6)) . '.' . $extension;
+        if (!move_uploaded_file((string) $file['tmp_name'], $directory . '/' . $filename)) {
+            throw new \RuntimeException('The uploaded file could not be saved.');
+        }
+
+        return $key . '/' . $filename;
     }
 
-    private static function fetchRows(string $sql, callable $map): array
-    {
-        $statement = self::db()->query($sql);
-        return array_map($map, $statement->fetchAll());
-    }
-
-    private static function execute(string $sql, array $parameters): void
-    {
-        $statement = self::db()->prepare($sql);
-        $statement->execute($parameters);
-    }
-
-    private static function columnValues(string $table, string $column): array
+    private static function relationAllowed(string $table, string $column): bool
     {
         $allowed = [
             'drivers' => ['full_name'],
             'vehicles' => ['plate_number'],
             'users' => ['full_name'],
+            'roles' => ['role_name'],
             'trips' => ['reference_code'],
+            'transport_requests' => ['reference_code'],
+            'shipments' => ['shipment_code'],
+            'customers' => ['customer_name'],
             'warehouses' => ['warehouse_name'],
             'suppliers' => ['supplier_name'],
-            'roles' => ['role_name'],
+            'inventory_items' => ['item_name'],
+            'invoices' => ['invoice_number'],
+            'gl_accounts' => ['account_name'],
         ];
-        if (!isset($allowed[$table]) || !in_array($column, $allowed[$table], true)) {
-            return [];
+
+        return in_array($column, $allowed[$table] ?? [], true);
+    }
+
+    private static function relationExists(array $relation, string $id): bool
+    {
+        if (!self::relationAllowed($relation['table'], $relation['label'])) {
+            return false;
         }
 
-        $statement = self::db()->query("SELECT {$column} FROM {$table} ORDER BY {$column}");
-        return array_values(array_filter(array_column($statement->fetchAll(), $column), static fn ($value): bool => $value !== null && $value !== ''));
+        return (int) self::scalar("SELECT COUNT(*) FROM {$relation['table']} WHERE id = ?", [(int) $id]) > 0;
     }
 
-    private static function idBy(string $table, string $column, string $value): ?int
+    private static function relationLabel(array $field, mixed $id): string
     {
-        $value = trim($value);
-        if ($value === '' || $value === 'None') {
-            return null;
-        }
-        $statement = self::db()->prepare("SELECT id FROM {$table} WHERE {$column} = ? LIMIT 1");
-        $statement->execute([$value]);
-        $id = $statement->fetchColumn();
-        return $id === false ? null : (int) $id;
-    }
-
-    private static function deleteTarget(string $key): array
-    {
-        return match ($key) {
-            'vehicles' => ['vehicles', 'plate_number'],
-            'drivers' => ['drivers', 'full_name'],
-            'trips' => ['trips', 'reference_code'],
-            'requests' => ['transport_requests', 'reference_code'],
-            'deliveries' => ['deliveries', 'delivery_code'],
-            'fuel' => ['fuel_records', 'reference_code'],
-            'expenses' => ['expenses', 'reference_code'],
-            'warehouse' => ['inventory_items', 'item_name'],
-            'maintenance' => ['maintenance_orders', 'work_order_code'],
-            'procurement' => ['purchase_requests', 'request_code'],
-            'users' => ['users', 'full_name'],
-            'reports' => ['reports', 'report_name'],
-            default => throw new \InvalidArgumentException('Unknown module.'),
-        };
-    }
-
-    private static function statusTarget(string $key): ?array
-    {
-        return match ($key) {
-            'vehicles' => ['vehicles', 'plate_number', 'status', 'available', 'inactive'],
-            'drivers' => ['drivers', 'full_name', 'status', 'available', 'inactive'],
-            'trips' => ['trips', 'reference_code', 'status', 'approved', 'cancelled'],
-            'requests' => ['transport_requests', 'reference_code', 'status', 'approved', 'cancelled'],
-            'deliveries' => ['deliveries', 'delivery_code', 'status', 'in_transit', 'failed'],
-            'expenses' => ['expenses', 'reference_code', 'status', 'approved', 'rejected'],
-            'warehouse' => ['inventory_items', 'item_name', 'status', 'in_stock', 'out_of_stock'],
-            'maintenance' => ['maintenance_orders', 'work_order_code', 'status', 'open', 'cancelled'],
-            'procurement' => ['purchase_requests', 'request_code', 'status', 'approved', 'rejected'],
-            'users' => ['users', 'full_name', 'status', 'active', 'inactive'],
-            default => null,
-        };
-    }
-
-    private static function statusOptions(string $key): array
-    {
-        return match ($key) {
-            'vehicles' => ['Available', 'On trip', 'Maintenance', 'Inactive'],
-            'drivers' => ['Available', 'On trip', 'Off duty', 'Inactive'],
-            'trips' => ['Requested', 'Approved', 'Loading', 'In transit', 'Delivered', 'Cancelled'],
-            'requests' => ['Pending', 'Approved', 'Assigned', 'Rejected', 'Cancelled'],
-            'deliveries' => ['Loading', 'In transit', 'Delivered', 'Failed'],
-            'expenses' => ['Pending', 'Approved', 'Rejected'],
-            'warehouse' => ['In stock', 'Reorder', 'Out of stock'],
-            'maintenance' => ['Open', 'Scheduled', 'In progress', 'Completed', 'Cancelled'],
-            'procurement' => ['Draft', 'Quotation', 'Approved', 'Received', 'Rejected'],
-            'users' => ['Active', 'Inactive', 'Locked'],
-            default => [],
-        };
-    }
-
-    private static function fileColumns(string $key): array
-    {
-        return match ($key) {
-            'deliveries' => [5 => 'Proof file', 6 => 'Signature file'],
-            'fuel' => [7 => 'Receipt file'],
-            default => [],
-        };
-    }
-
-    private static function uploadedPath(string $module, int $index, array $files, string $existing): string
-    {
-        $field = 'field_' . $index;
-        if (!isset($files[$field]) || ($files[$field]['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
-            return $existing;
-        }
-
-        $extension = strtolower(pathinfo((string) $files[$field]['name'], PATHINFO_EXTENSION));
-        $directory = dirname(__DIR__, 2) . '/storage/uploads/' . $module;
-        if (!is_dir($directory)) {
-            mkdir($directory, 0775, true);
-        }
-
-        $filename = date('YmdHis') . '-' . bin2hex(random_bytes(6)) . '.' . $extension;
-        $target = $directory . '/' . $filename;
-        if (!move_uploaded_file((string) $files[$field]['tmp_name'], $target)) {
-            throw new \RuntimeException('Uploaded file could not be saved.');
-        }
-
-        return 'storage/uploads/' . $module . '/' . $filename;
-    }
-
-    private static function enum(string $label): string
-    {
-        return strtolower(str_replace(' ', '_', trim($label)));
-    }
-
-    private static function label(?string $value): string
-    {
-        if ($value === null || $value === '') {
+        if ($id === null || $id === '') {
             return '';
         }
 
-        return ucwords(str_replace('_', ' ', $value));
+        $relation = $field['relation'];
+        if (!self::relationAllowed($relation['table'], $relation['label'])) {
+            return '';
+        }
+
+        $value = self::scalar("SELECT {$relation['label']} FROM {$relation['table']} WHERE id = ?", [(int) $id]);
+
+        return $value === false || $value === null ? '' : (string) $value;
     }
 
-    private static function formatDate(?string $value): string
+    private static function lastOdometer(int $vehicleId, ?int $excludeFuelId): ?int
     {
-        return $value ? date('Y-m-d', strtotime($value)) : '';
+        $sql = 'SELECT MAX(mileage) FROM fuel_records WHERE vehicle_id = ? AND deleted_at IS NULL';
+        $parameters = [$vehicleId];
+        if ($excludeFuelId !== null) {
+            $sql .= ' AND id <> ?';
+            $parameters[] = $excludeFuelId;
+        }
+
+        $value = self::scalar($sql, $parameters);
+
+        return $value === null || $value === false ? null : (int) $value;
     }
 
-    private static function formatDateTime(?string $value): string
+    private static function stockStatus(float $quantity, float $minimum): string
     {
-        return $value ? date('Y-m-d H:i', strtotime($value)) : '';
+        return match (true) {
+            $quantity <= 0 => 'out_of_stock',
+            $quantity <= $minimum => 'reorder',
+            default => 'in_stock',
+        };
     }
 
-    private static function decimal(mixed $value): string
+    private static function scalar(string $sql, array $parameters = []): mixed
     {
-        return $value === null || $value === '' ? '' : rtrim(rtrim(number_format((float) $value, 2, '.', ''), '0'), '.');
+        $statement = self::db()->prepare($sql);
+        $statement->execute($parameters);
+
+        return $statement->fetchColumn();
     }
 
-    private static function number(string $value): string
+    /** Recent audit entries for the sidebar panel on a list page. */
+    public static function auditLog(int $limit = 12): array
     {
-        return str_replace(',', '', trim($value));
-    }
+        $statement = self::db()->query(
+            'SELECT a.action_name, a.entity_type, a.entity_id, a.reason, a.created_at, COALESCE(u.full_name, "System") AS actor
+               FROM audit_logs a
+               LEFT JOIN users u ON u.id = a.user_id
+              ORDER BY a.id DESC
+              LIMIT ' . max(1, $limit)
+        );
 
-    private static function nullable(string $value): ?string
-    {
-        $value = trim($value);
-        return $value === '' || $value === 'None' ? null : $value;
+        return $statement->fetchAll();
     }
 }

@@ -1,4 +1,4 @@
-    <footer class="lms-footer">Powered by ITEC LTD &copy; <?= date('Y') ?></footer>
+    <footer class="lms-footer"><?= e(company_name()) ?> &middot; Logistics Management System &copy; <?= date('Y') ?></footer>
   </main>
 </div>
 <script src="<?= $baseUrl ?>/assets/js/jquery.min.js"></script>
@@ -6,18 +6,151 @@
 <script src="<?= $baseUrl ?>/assets/js/moment.min.js"></script>
 <script src="<?= $baseUrl ?>/assets/js/bootstrap.min.js"></script>
 <script src="<?= $baseUrl ?>/assets/js/simplebar.min.js"></script>
-<script src="<?= $baseUrl ?>/assets/js/daterangepicker.js"></script>
 <script src="<?= $baseUrl ?>/assets/js/tinycolor-min.js"></script>
 <script src="<?= $baseUrl ?>/assets/js/config.js"></script>
 <script src="<?= $baseUrl ?>/assets/js/apps.js"></script>
-<script src="<?= $baseUrl ?>/assets/js/jquery.dataTables.min.js"></script>
-<script src="<?= $baseUrl ?>/assets/js/dataTables.bootstrap4.min.js"></script>
 <script src="<?= $baseUrl ?>/assets/js/select2.min.js"></script>
-<?php foreach (($pageScripts ?? []) as $pageScript): ?><script src="<?= $baseUrl . htmlspecialchars($pageScript) ?>"></script>
+<?php foreach (($pageScripts ?? []) as $pageScript): ?><script src="<?= $baseUrl . e($pageScript) ?>"></script>
 <?php endforeach; ?>
-<div class="modal fade" id="statusConfirmModal" tabindex="-1" role="dialog" aria-hidden="true"><div class="modal-dialog modal-dialog-centered" role="document"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Change status</h5><button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div><div class="modal-body"><p class="mb-0">Confirm changing this record to <strong class="status-target">ON (1)</strong>?</p></div><div class="modal-footer"><button type="button" class="btn btn-light" data-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="confirmStatusButton">Confirm change</button></div></div></div></div>
-<div class="modal fade" id="deleteConfirmModal" tabindex="-1" role="dialog" aria-hidden="true"><div class="modal-dialog modal-dialog-centered" role="document"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Delete record</h5><button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div><div class="modal-body"><p>Deletion is permanent. Enter a reason to continue.</p><label for="deleteReason">Reason</label><textarea class="form-control" id="deleteReason" rows="3" required></textarea><div class="invalid-feedback">A reason is required.</div></div><div class="modal-footer"><button type="button" class="btn btn-light" data-dismiss="modal">Cancel</button><button type="button" class="btn btn-danger" id="confirmDeleteButton">Delete record</button></div></div></div></div>
-<script>$(function(){ $('.select2').select2({theme:'bootstrap4',width:'100%'}); $('.logistics-data-table').each(function(){ var table=$(this).DataTable({autoWidth:true,lengthMenu:[[10,25,50,-1],[10,25,50,'All']]}); $(table.table().node()).wrap('<div class="table-responsive logistics-table-scroll"></div>'); $('.module-search').on('keyup',function(){ table.search(this.value).draw(); }); $('.module-status-filter').on('change',function(){ table.search(this.value).draw(); }); }); var pendingStatusForm=null,pendingStatusValue=null,pendingDeleteForm=null; $('.status-switch').on('change',function(event){ event.preventDefault(); var input=$(this); pendingStatusValue=input.is(':checked') ? 1 : 0; input.prop('checked',!input.is(':checked')); pendingStatusForm=input.closest('form'); $('.status-target').text(pendingStatusValue ? 'ON (1)' : 'OFF (0)'); $('#statusConfirmModal').modal('show'); }); $('#confirmStatusButton').on('click',function(){ if(!pendingStatusForm){return;} pendingStatusForm.find('input[name=status]').val(pendingStatusValue); pendingStatusForm[0].submit(); }); $('#statusConfirmModal').on('hidden.bs.modal',function(){ pendingStatusForm=null; pendingStatusValue=null; }); $('.delete-form').on('submit',function(event){ event.preventDefault(); pendingDeleteForm=this; $('#deleteReason').val('').removeClass('is-invalid'); $('#deleteConfirmModal').modal('show'); }); $('#confirmDeleteButton').on('click',function(){ var reason=$('#deleteReason').val().trim(); if(!reason){ $('#deleteReason').addClass('is-invalid'); return; } $(pendingDeleteForm).find('input[name=reason]').val(reason); pendingDeleteForm.submit(); }); });</script>
+
+<div class="modal fade" id="statusConfirmModal" tabindex="-1" role="dialog" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title">Change status</h5><button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div>
+  <div class="modal-body"><p class="mb-0">Switch this record <strong class="status-target">on</strong>?</p></div>
+  <div class="modal-footer"><button type="button" class="btn btn-light" data-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="confirmStatusButton">Confirm</button></div>
+</div></div></div>
+
+<div class="modal fade" id="deleteConfirmModal" tabindex="-1" role="dialog" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title">Delete record</h5><button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div>
+  <div class="modal-body">
+    <p>The record is removed from the lists but kept in the audit trail. Enter a reason to continue.</p>
+    <label for="deleteReason">Reason</label>
+    <textarea class="form-control" id="deleteReason" rows="3" required></textarea>
+    <div class="invalid-feedback">A reason is required.</div>
+  </div>
+  <div class="modal-footer"><button type="button" class="btn btn-light" data-dismiss="modal">Cancel</button><button type="button" class="btn btn-danger" id="confirmDeleteButton">Delete record</button></div>
+</div></div></div>
+
+<div class="modal fade" id="reasonModal" tabindex="-1" role="dialog" aria-hidden="true"><div class="modal-dialog modal-dialog-centered"><div class="modal-content">
+  <div class="modal-header"><h5 class="modal-title" id="reasonModalTitle">Reason</h5><button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button></div>
+  <div class="modal-body">
+    <p class="small text-muted">This reason is stored on the record and in the audit trail.</p>
+    <label for="reasonText">Reason</label>
+    <textarea class="form-control" id="reasonText" rows="3" required></textarea>
+    <div class="invalid-feedback">A reason is required.</div>
+  </div>
+  <div class="modal-footer"><button type="button" class="btn btn-light" data-dismiss="modal">Cancel</button><button type="button" class="btn btn-primary" id="confirmReasonButton">Confirm</button></div>
+</div></div></div>
+
+<script>
+$(function () {
+  // Searchable dropdowns everywhere a relation or a long option list is shown.
+  $('.lms-select').each(function () {
+    var $select = $(this);
+    if ($select.find('option').length > 8) {
+      $select.select2({theme: 'bootstrap4', width: '100%', placeholder: $select.find('option:first').text()});
+    }
+  });
+
+  // File inputs show the chosen file name instead of staying blank.
+  $(document).on('change', '.custom-file-input', function () {
+    var name = this.files && this.files.length ? this.files[0].name : 'Choose file';
+    $(this).next('.custom-file-label').text(name);
+  });
+
+  // Status switch: confirm before posting, and never leave the switch showing a
+  // state the server has not accepted.
+  var pendingStatusForm = null, pendingStatusValue = null;
+  $(document).on('change', '.status-switch', function (event) {
+    event.preventDefault();
+    var $input = $(this);
+    pendingStatusValue = $input.is(':checked') ? 1 : 0;
+    $input.prop('checked', !$input.is(':checked'));
+    pendingStatusForm = $input.closest('form');
+    $('.status-target').text(pendingStatusValue ? 'on' : 'off');
+    $('#statusConfirmModal').modal('show');
+  });
+  $('#confirmStatusButton').on('click', function () {
+    if (!pendingStatusForm) { return; }
+    pendingStatusForm.find('input[name=status]').val(pendingStatusValue);
+    pendingStatusForm[0].submit();
+  });
+  $('#statusConfirmModal').on('hidden.bs.modal', function () { pendingStatusForm = null; pendingStatusValue = null; });
+
+  // Delete always asks for a reason.
+  var pendingDeleteForm = null;
+  $(document).on('submit', '.delete-form', function (event) {
+    event.preventDefault();
+    pendingDeleteForm = this;
+    $('#deleteReason').val('').removeClass('is-invalid');
+    $('#deleteConfirmModal').modal('show');
+  });
+  $('#confirmDeleteButton').on('click', function () {
+    var reason = $.trim($('#deleteReason').val());
+    if (!reason) { $('#deleteReason').addClass('is-invalid'); return; }
+    $(pendingDeleteForm).find('input[name=reason]').val(reason);
+    pendingDeleteForm.submit();
+  });
+
+  // Workflow actions that need a reason (reject, cancel, record failure).
+  var pendingReasonForm = null;
+  $(document).on('submit', '.reason-form', function (event) {
+    event.preventDefault();
+    pendingReasonForm = this;
+    $('#reasonModalTitle').text($(this).data('reason-title') || 'Reason');
+    $('#reasonText').val('').removeClass('is-invalid');
+    $('#reasonModal').modal('show');
+  });
+  $('#confirmReasonButton').on('click', function () {
+    var reason = $.trim($('#reasonText').val());
+    if (!reason) { $('#reasonText').addClass('is-invalid'); return; }
+    $(pendingReasonForm).find('input[name=reason]').val(reason);
+    pendingReasonForm.submit();
+  });
+
+  // Line item tables: add a row, clear a row, keep the running total honest.
+  $(document).on('click', '.lms-line-add', function () {
+    var $form = $(this).closest('.lms-lines');
+    var $body = $form.find('tbody');
+    var index = parseInt($form.attr('data-next-index'), 10) || $body.find('tr').length;
+    var $row = $body.find('tr').last().clone();
+    $row.find('input, select').each(function () {
+      var name = $(this).attr('name');
+      if (name) { $(this).attr('name', name.replace(/lines\[\d+\]/, 'lines[' + index + ']')); }
+      if ($(this).is('input')) { $(this).val(''); }
+    });
+    $row.find('.lms-line-total').text('');
+    $body.append($row);
+    $form.attr('data-next-index', index + 1);
+  });
+
+  $(document).on('click', '.lms-line-clear', function () {
+    var $row = $(this).closest('tr');
+    $row.find('input').val('');
+    $row.find('.lms-line-total').text('');
+  });
+
+  $(document).on('input', '.lms-line-number', function () {
+    var $row = $(this).closest('tr');
+    var numbers = $row.find('.lms-line-number').map(function () { return parseFloat(this.value) || 0; }).get();
+    if (numbers.length >= 2) {
+      var total = numbers[0] * numbers[numbers.length - 1];
+      $row.find('.lms-line-total').text(total ? total.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '');
+    }
+  });
+
+  // Percentage cells in reports get a subtle bar so a column can be read at a glance.
+  $('.lms-pct').each(function () {
+    var value = parseFloat($(this).attr('data-value'));
+    if (!isNaN(value)) {
+      $(this).css('background', 'linear-gradient(to right, rgba(94,114,228,0.16) ' + Math.max(0, Math.min(100, value)) + '%, transparent ' + Math.max(0, Math.min(100, value)) + '%)');
+    }
+  });
+
+  // Dismiss flash messages on their own after a while.
+  setTimeout(function () { $('.lms-flash').not('.alert-danger').alert('close'); }, 6000);
+});
+</script>
+
 <script>
 (function () {
   var box = document.querySelector('.lms-search');

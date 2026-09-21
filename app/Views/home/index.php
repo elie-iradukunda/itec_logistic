@@ -63,8 +63,15 @@ $selectedEmail = $selectedRole !== '' ? ($accounts[$selectedRole]['email'] ?? ''
           </div>
         </div>
 
-        <?php if ($loginError): ?>
-          <div class="home-alert home-alert-danger">Check the role, email and password, then try again.</div>
+        <?php if ($loginError === 'locked'): ?>
+          <div class="home-alert home-alert-danger">
+            Too many failed sign-ins. This account is locked
+            <?= isset($_GET['minutes']) && (int) $_GET['minutes'] > 0 ? 'for about ' . (int) $_GET['minutes'] . ' more minute(s)' : 'until an administrator unlocks it' ?>.
+          </div>
+        <?php elseif ($loginError === 'token'): ?>
+          <div class="home-alert home-alert-danger">Your session expired before the form was sent. Please try again.</div>
+        <?php elseif ($loginError !== ''): ?>
+          <div class="home-alert home-alert-danger">That email and password do not match an active account.</div>
         <?php elseif ($loginRequired): ?>
           <div class="home-alert">Please sign in before opening the operations workspace.</div>
         <?php elseif ($loggedOut): ?>
@@ -76,6 +83,7 @@ $selectedEmail = $selectedRole !== '' ? ($accounts[$selectedRole]['email'] ?? ''
         <?php endif; ?>
 
         <form class="home-login-form" method="post" action="<?= url('login') ?>">
+          <?= csrf_field() ?>
           <label for="loginRole">Role</label>
           <select id="loginRole" name="role" required <?= $accountRoles === [] ? 'disabled' : '' ?>>
             <?php foreach ($accountRoles as $roleKey => $definition): ?>
@@ -89,9 +97,10 @@ $selectedEmail = $selectedRole !== '' ? ($accounts[$selectedRole]['email'] ?? ''
           <input id="loginEmail" name="email" type="email" value="<?= htmlspecialchars($selectedEmail) ?>" autocomplete="username" required <?= $accountRoles === [] ? 'disabled' : '' ?>>
 
           <label for="loginPassword">Password</label>
-          <input id="loginPassword" name="password" type="password" value="password" autocomplete="current-password" required <?= $accountRoles === [] ? 'disabled' : '' ?>>
+          <input id="loginPassword" name="password" type="password" autocomplete="current-password" required <?= $accountRoles === [] ? 'disabled' : '' ?>>
 
           <button class="button button-primary button-block" type="submit" <?= $accountRoles === [] ? 'disabled' : '' ?>><i class="fe fe-log-in"></i> Login to dashboard</button>
+          <p class="login-help"><a href="<?= url('forgot-password') ?>">Forgotten your password?</a></p>
         </form>
 
         <div class="demo-accounts">

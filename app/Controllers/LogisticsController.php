@@ -1,123 +1,381 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Controllers;
 
-use Models\LogisticsData;
+use Core\Flash;
 use Models\AuditLog;
+use Models\LogisticsData;
+use Models\Permission;
+use Models\Schema;
+use Models\Workflow;
 
-class LogisticsController
+/**
+ * One controller for every logistics module. What each module contains, which
+ * fields it has and how its form is laid out all come from Models\Schema.
+ */
+final class LogisticsController
 {
-    public function index(array $params): void { $this->render($params['module'], 'index'); }
-    public function create(array $params): void { $this->render($params['module'], 'create'); }
-    public function details(array $params): void { $this->render($params['module'], 'details', $params['id']); }
-    public function edit(array $params): void { $this->render($params['module'], 'edit', $params['id']); }
-    public function toggle(array $params): void { $this->render($params['module'], 'toggle', $params['id']); }
-    public function delete(array $params): void { $this->render($params['module'], 'delete', $params['id']); }
-    public function export(array $params): void { $this->exportReport($params['id'] ?? null); }
-
-    private function render(string $key, string $action, ?string $id = null): void
+    public function index(array $params): void
     {
-        if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-            if ($action === 'delete' && $id !== null) {
-                $reason = trim((string) ($_POST['reason'] ?? ''));
-                if ($reason === '') {
-                    header('Location: ' . \url($key, ['error' => 'delete_reason']));
-                    exit;
-                }
-                try {
-                    LogisticsData::delete($key, $id, $reason);
-                } catch (\Throwable) {
-                    header('Location: ' . \url($key, ['error' => 'delete_failed']));
-                    exit;
-                }
-            } elseif ($action === 'toggle' && $id !== null) {
-                LogisticsData::setStatus($key, $id, (int) ($_POST['status'] ?? 0));
-            } elseif ($action === 'create' || $action === 'edit') {
-                $values = [];
-                foreach (LogisticsData::module($key)['columns'] as $index => $column) {
-                    $values[] = trim((string) ($_POST['field_' . $index] ?? ($_POST['existing_field_' . $index] ?? '')));
-                }
-                $errors = LogisticsData::validate($key, $values, $_FILES);
-                if ($errors !== []) {
-                    $module = LogisticsData::module($key);
-                    \view('modules/index', [
-                        'title' => $module['title'],
-                        'moduleKey' => $key,
-                        'module' => $module,
-                        'action' => $action,
-                        'saved' => false,
-                        'record' => $values,
-                        'audit' => LogisticsData::auditLog(),
-                        'error' => null,
-                        'errors' => $errors,
-                        'reportType' => '',
-                    ]);
-                    return;
-                }
-                try {
-                    LogisticsData::save($key, $id, $values, $_FILES);
-                } catch (\Throwable $exception) {
-                    $module = LogisticsData::module($key);
-                    \view('modules/index', [
-                        'title' => $module['title'],
-                        'moduleKey' => $key,
-                        'module' => $module,
-                        'action' => $action,
-                        'saved' => false,
-                        'record' => $values,
-                        'audit' => LogisticsData::auditLog(),
-                        'error' => null,
-                        'errors' => ['Unable to save record: ' . $exception->getMessage()],
-                        'reportType' => '',
-                    ]);
-                    return;
-                }
-            }
-            header('Location: ' . \url($key, ['saved' => 1]));
-            exit;
-        }
+        $key = $this->key($params);
+        $module = Schema::get($key);
+        $listing = LogisticsData::listing($key, $_GET, \current_context());
 
-        $module = LogisticsData::module($key);
-        $reportType = (string) ($_GET['report_type'] ?? '');
-        if ($key === 'reports' && $reportType !== '') {
-            $module['rows'] = array_values(array_filter($module['rows'], static fn (array $row): bool => $row[0] === $reportType || $row[1] === $reportType));
-        }
-        $record = $id !== null ? LogisticsData::find($key, $id) : null;
         \view('modules/index', [
             'title' => $module['title'],
             'moduleKey' => $key,
             'module' => $module,
-            'action' => $action,
-            'saved' => ($_GET['saved'] ?? '') === '1',
-            'record' => $record,
-            'audit' => LogisticsData::auditLog(),
-            'error' => $_GET['error'] ?? null,
-            'reportType' => $reportType,
+            'listing' => $listing,
+            'audit' => LogisticsData::auditLog(8),
         ]);
     }
 
-    private function exportReport(?string $id): void
+    public function create(array $params): void
     {
-        $module = LogisticsData::module('reports');
-        $rows = $module['rows'];
-        $reportType = (string) ($_GET['report_type'] ?? '');
-        if ($reportType !== '') {
-            $rows = array_values(array_filter($rows, static fn (array $row): bool => $row[0] === $reportType || $row[1] === $reportType));
-        }
-        if ($id !== null) {
-            $rows = array_values(array_filter($rows, static fn (array $row): bool => (string) $row[0] === $id));
+        $key = $this->key($params);
+        $module = Schema::get($key);
+
+        $this->renderForm($key, $module, null, $this->defaults($key), []);
+    }
+
+    public function store(array $params): void
+    {
+        $key = $this->key($params);
+        $module = Schema::get($key);
+        $input = $this->input();
+
+        $errors = LogisticsData::validate($key, $input, $_FILES, null);
+        if ($errors !== []) {
+            $this->renderForm($key, $module, null, $input, $errors);
+            return;
         }
 
-        $filename = 'itec-logistics-reports-' . date('Y-m-d') . '.csv';
+        try {
+            $id = LogisticsData::save($key, null, $input, $_FILES);
+        } catch (\Throwable $exception) {
+            $this->renderForm($key, $module, null, $input, [$this->friendly($exception)]);
+            return;
+        }
+
+        Flash::success(sprintf('%s created.', $module['singular']));
+
+        // A new account gets a one-time password, shown once so the administrator
+        // can pass it on. It is never stored or displayed again.
+        $oneTime = LogisticsData::takeOneTimePassword();
+        if ($oneTime !== null) {
+            Flash::warning(sprintf(
+                'One-time password for %s: %s — give it to them directly. They must change it at first sign-in, and it will not be shown again.',
+                $input['email'] ?? 'the new account',
+                $oneTime
+            ));
+        }
+
+        $this->redirect(\url([$key, $id]));
+    }
+
+    public function details(array $params): void
+    {
+        $key = $this->key($params);
+        $module = Schema::get($key);
+        $id = (int) $params['id'];
+
+        $record = LogisticsData::find($key, $id, \current_context());
+        if ($record === null) {
+            Flash::error('That record does not exist, or it is not visible to your role.');
+            $this->redirect(\url($key));
+        }
+
+        $code = LogisticsData::code($key, $record);
+
+        \view('modules/details', [
+            'title' => $code,
+            'moduleKey' => $key,
+            'module' => $module,
+            'record' => $record,
+            'display' => LogisticsData::display($key, $record),
+            'code' => $code,
+            'lines' => LogisticsData::lines($key, $id),
+            'related' => LogisticsData::related($key, $id, \current_role()),
+            'history' => LogisticsData::history($key, $code),
+            'actions' => Workflow::availableActions($key, $record),
+        ]);
+    }
+
+    public function edit(array $params): void
+    {
+        $key = $this->key($params);
+        $module = Schema::get($key);
+        $id = (int) $params['id'];
+
+        $record = LogisticsData::find($key, $id, \current_context());
+        if ($record === null) {
+            Flash::error('That record does not exist, or it is not visible to your role.');
+            $this->redirect(\url($key));
+        }
+
+        $this->renderForm($key, $module, $id, $record, []);
+    }
+
+    public function update(array $params): void
+    {
+        $key = $this->key($params);
+        $module = Schema::get($key);
+        $id = (int) $params['id'];
+
+        if (LogisticsData::find($key, $id, \current_context()) === null) {
+            Flash::error('That record does not exist, or it is not visible to your role.');
+            $this->redirect(\url($key));
+        }
+
+        $input = $this->input();
+        $errors = LogisticsData::validate($key, $input, $_FILES, $id);
+        if ($errors !== []) {
+            $this->renderForm($key, $module, $id, $input + ['id' => $id], $errors);
+            return;
+        }
+
+        try {
+            LogisticsData::save($key, $id, $input, $_FILES);
+        } catch (\Throwable $exception) {
+            $this->renderForm($key, $module, $id, $input + ['id' => $id], [$this->friendly($exception)]);
+            return;
+        }
+
+        Flash::success(sprintf('%s updated.', $module['singular']));
+        $this->redirect(\url([$key, $id]));
+    }
+
+    /** Saves the child rows of a record: trip stops, invoice lines, maintenance parts. */
+    public function lines(array $params): void
+    {
+        $key = $this->key($params);
+        $id = (int) $params['id'];
+
+        if (LogisticsData::find($key, $id, \current_context()) === null) {
+            Flash::error('That record does not exist.');
+            $this->redirect(\url($key));
+        }
+
+        $rows = $_POST['lines'] ?? [];
+        try {
+            LogisticsData::saveLines($key, $id, is_array($rows) ? $rows : []);
+            Flash::success(Schema::get($key)['lines']['title'] . ' saved.');
+        } catch (\Throwable $exception) {
+            Flash::error($this->friendly($exception));
+        }
+
+        $this->redirect(\url([$key, $id]));
+    }
+
+    public function toggle(array $params): void
+    {
+        $key = $this->key($params);
+        $id = (int) $params['id'];
+
+        try {
+            $status = LogisticsData::toggleStatus($key, $id, ($_POST['status'] ?? '0') === '1');
+            Flash::success('Status changed to ' . Schema::label($status) . '.');
+        } catch (\Throwable $exception) {
+            Flash::error($this->friendly($exception));
+        }
+
+        $this->redirect($this->backTo($key));
+    }
+
+    public function delete(array $params): void
+    {
+        $key = $this->key($params);
+        $id = (int) $params['id'];
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+
+        if ($reason === '') {
+            Flash::error('A deletion reason is required before a record can be removed.');
+            $this->redirect($this->backTo($key));
+        }
+
+        try {
+            LogisticsData::remove($key, $id, $reason);
+            Flash::success(sprintf('%s removed. It stays in the audit trail.', Schema::get($key)['singular']));
+        } catch (\Throwable $exception) {
+            Flash::error($this->friendly($exception));
+        }
+
+        $this->redirect(\url($key));
+    }
+
+    /** Approve, reject, dispatch, complete, receive: one workflow transition with its side effects. */
+    public function action(array $params): void
+    {
+        $key = $this->key($params);
+        $id = (int) $params['id'];
+        $action = (string) $params['action'];
+        $reason = trim((string) ($_POST['reason'] ?? ''));
+
+        $result = Workflow::apply($key, $id, $action, $reason);
+        $result['ok'] ? Flash::success($result['message']) : Flash::error($result['message']);
+
+        $this->redirect(\url([$key, $id]));
+    }
+
+    /** CSV of exactly what the current filters show, not of the whole table. */
+    public function export(array $params): void
+    {
+        $key = $this->key($params);
+        $module = Schema::get($key);
+
+        $query = $_GET + ['per_page' => 100, 'page' => 1];
+        $filename = sprintf('%s-%s.csv', $key, date('Y-m-d'));
+
+        AuditLog::record('record.exported', $key, null, null, ['filters' => array_intersect_key($_GET, $module['filters'])]);
+
         header('Content-Type: text/csv; charset=utf-8');
         header('Content-Disposition: attachment; filename="' . $filename . '"');
-        AuditLog::record('report.exported', 'reports', $id, null, ['report_type' => $reportType]);
+
         $output = fopen('php://output', 'wb');
-        fputcsv($output, $module['columns']);
-        foreach ($rows as $row) {
-            fputcsv($output, $row);
-        }
+        fputcsv($output, array_column($module['list'], 'label'));
+
+        $page = 1;
+        do {
+            $query['page'] = $page;
+            $listing = LogisticsData::listing($key, $query, \current_context());
+            foreach ($listing['rows'] as $row) {
+                $line = [];
+                foreach ($module['list'] as $column => $spec) {
+                    $line[] = $this->csvValue($row[$column] ?? '', $spec['type'] ?? 'text');
+                }
+                fputcsv($output, $line);
+            }
+            $page++;
+        } while ($page <= $listing['pages'] && $page <= 200);
+
         fclose($output);
+        exit;
+    }
+
+    // --------------------------------------------------------------- helpers
+
+    private function renderForm(string $key, array $module, ?int $id, array $record, array $errors): void
+    {
+        \view('modules/form', [
+            'title' => $id === null ? $module['button'] : 'Edit ' . $module['singular'],
+            'moduleKey' => $key,
+            'module' => $module,
+            'record' => $record,
+            'recordId' => $id,
+            'errors' => $errors,
+            'formAction' => $id === null ? \url($key) : \url([$key, $id]),
+        ]);
+    }
+
+    /** Sensible starting values so a new record opens half filled in, not blank. */
+    private function defaults(string $key): array
+    {
+        $today = date('Y-m-d');
+        $now = date('Y-m-d H:i:s');
+
+        $defaults = match ($key) {
+            'vehicles' => ['status' => 'available', 'fuel_type' => 'diesel', 'ownership' => 'owned', 'mileage' => 0],
+            'drivers' => ['status' => 'available'],
+            'vehicle_documents' => ['document_type' => 'insurance', 'status' => 'valid', 'issued_on' => $today],
+            'maintenance' => ['status' => 'open', 'priority' => 'normal', 'maintenance_type' => 'preventive', 'due_date' => $today],
+            'requests' => ['status' => 'pending', 'priority' => 'normal', 'required_date' => $today, 'requester_id' => \current_user_id()],
+            'trips' => ['status' => 'requested', 'trip_type' => 'delivery'],
+            'shipments' => ['status' => 'draft', 'cargo_type' => 'general', 'packages_count' => 1],
+            'deliveries' => ['status' => 'loading', 'attempt_number' => 1, 'failure_reason' => 'none'],
+            'customers' => ['status' => 'active', 'customer_type' => 'corporate', 'payment_terms_days' => \Models\Settings::int('payment_terms_days', 30)],
+            'rates' => ['status' => 'active', 'rate_type' => 'per_trip', 'effective_from' => $today],
+            'invoices' => ['status' => 'draft', 'issue_date' => $today, 'due_date' => date('Y-m-d', strtotime('+' . \Models\Settings::int('payment_terms_days', 30) . ' days')), 'tax_rate' => \Models\Settings::get('tax_rate', '18')],
+            'fuel' => ['fuel_type' => 'diesel', 'is_full_tank' => 1, 'purchased_at' => $now],
+            'expenses' => ['status' => 'pending', 'expense_date' => $today, 'payment_method' => 'cash', 'submitted_by' => \current_user_id()],
+            'warehouse' => ['status' => 'in_stock', 'unit_of_measure' => 'Unit', 'quantity' => 0, 'minimum_level' => 0],
+            'movements' => ['movement_type' => 'stock_in', 'moved_at' => $now, 'reference_type' => 'adjustment'],
+            'procurement' => ['status' => 'draft', 'requested_by' => \current_user_id()],
+            'suppliers' => ['status' => 'active', 'payment_terms_days' => 30],
+            'users' => ['status' => 'active', 'prvg' => 2, 'must_change_password' => 1],
+            'reports' => ['format_label' => 'CSV', 'period_label' => 'Monthly', 'owner_name' => \current_user_name(), 'action_label' => 'View'],
+            default => [],
+        };
+
+        return $defaults;
+    }
+
+    /** Form fields arrive under `f[...]` so they cannot collide with `_token` or `page`. */
+    private function input(): array
+    {
+        $input = $_POST['f'] ?? [];
+        if (!is_array($input)) {
+            return [];
+        }
+
+        foreach ($_POST as $name => $value) {
+            if (str_starts_with($name, 'existing_') && is_string($value)) {
+                $input[$name] = $value;
+            }
+        }
+
+        return $input;
+    }
+
+    private function key(array $params): string
+    {
+        $key = (string) ($params['module'] ?? '');
+        if (!Schema::has($key)) {
+            throw new \InvalidArgumentException('Unknown module.');
+        }
+
+        return $key;
+    }
+
+    /** Back to the list, keeping the filters the user had applied. */
+    private function backTo(string $key): string
+    {
+        $module = Schema::get($key);
+        $keep = array_intersect_key($_GET, array_flip(array_merge(['q', 'page', 'per_page', 'sort', 'dir'], array_keys($module['filters']))));
+
+        return \url($key, $keep);
+    }
+
+    private function csvValue(mixed $value, string $type): string
+    {
+        if ($value === null || $value === '') {
+            return '';
+        }
+
+        return match ($type) {
+            'badge', 'label' => Schema::label((string) $value),
+            'money' => number_format((float) $value, 2, '.', ''),
+            default => (string) $value,
+        };
+    }
+
+    /** Turns a database error into something an operations user can act on. */
+    private function friendly(\Throwable $exception): string
+    {
+        $message = $exception->getMessage();
+
+        // Validation catches duplicates first and names the field. This is the
+        // backstop for the rest: it at least repeats the value the database
+        // objected to, so the person is not left guessing which box was wrong.
+        if (str_contains($message, '1062')) {
+            return preg_match("/Duplicate entry '(.*)' for key/", $message, $matches) === 1
+                ? sprintf('The value "%s" is already used by another record. Change it to something not yet taken.', $matches[1])
+                : 'One of these values is already used by another record. Change it to something not yet taken.';
+        }
+        if (str_contains($message, '1451') || str_contains($message, '1452')) {
+            return 'This record is linked to other logistics data, so it cannot be saved that way.';
+        }
+        if (str_contains($message, '1406')) {
+            return 'One of the values is too long for its field.';
+        }
+
+        return $message;
+    }
+
+    private function redirect(string $location): never
+    {
+        header('Location: ' . $location);
         exit;
     }
 }

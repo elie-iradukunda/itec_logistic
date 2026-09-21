@@ -1,18 +1,24 @@
 <?php
 
+declare(strict_types=1);
+
 namespace Controllers;
 
+use Core\Csrf;
+use Core\Flash;
 use Models\AuditLog;
+use Models\Notifier;
+use Models\Permission;
 use Models\UserRepository;
 
-class HomeController
+final class HomeController
 {
     public function index(): void
     {
         \view('home/index', [
             'title' => 'Logistics made visible',
             'accounts' => \demo_accounts(),
-            'loginError' => ($_GET['login_error'] ?? '') === '1',
+            'loginError' => (string) ($_GET['login_error'] ?? ''),
             'loginRequired' => ($_GET['login_required'] ?? '') === '1',
             'loggedOut' => ($_GET['logged_out'] ?? '') === '1',
         ]);
@@ -24,35 +30,60 @@ class HomeController
             $this->redirectHome();
         }
 
-        $role = (string) ($_POST['role'] ?? '');
+        if (!Csrf::check()) {
+            $this->redirectHome('login_error=token#login');
+        }
+
         $email = trim((string) ($_POST['email'] ?? ''));
         $password = (string) ($_POST['password'] ?? '');
         $repository = new UserRepository();
         $user = $repository->findActiveByEmail($email);
 
-        if (
-            $user === null ||
-            !isset(\role_definitions()[$role]) ||
-            $user['role_key'] !== $role ||
-            !password_verify($password, $user['password_hash'])
-        ) {
-            AuditLog::record('auth.login_failed', 'user', null, 'Invalid login attempt.', [
-                'email' => $email,
-                'role' => $role,
-            ]);
+        if ($user !== null) {
+            $user = $repository->clearExpiredLock($user);
+        }
+
+        $lock = $repository->lockState($user);
+        if ($lock['locked']) {
+            AuditLog::record('auth.login_locked', 'user', $user === null ? null : (string) $user['id'], 'Login attempted on a locked account.', ['email' => $email]);
+            $repository->logAttempt($email, false);
+            $this->redirectHome('login_error=locked&minutes=' . $lock['minutes'] . '#login');
+        }
+
+        if ($user === null || !password_verify($password, (string) $user['password_hash'])) {
+            $repository->registerFailure($email, $user);
+            AuditLog::record('auth.login_failed', 'user', null, 'Invalid login attempt.', ['email' => $email]);
             $this->redirectHome('login_error=1#login');
         }
 
+        // A new session id at the moment privileges change closes the session
+        // fixation hole that existed while the id was reused across login.
+        session_regenerate_id(true);
+        Csrf::rotate();
+
         $repository->touchLastLogin((int) $user['id']);
+        $repository->logAttempt($email, true);
+
         $_SESSION['logistics_authenticated'] = true;
-        $_SESSION['logistics_role'] = $role;
+        $_SESSION['logistics_role'] = (string) $user['role_key'];
         $_SESSION['logistics_user_id'] = (int) $user['id'];
         $_SESSION['logistics_user_name'] = $user['full_name'];
         $_SESSION['logistics_user_email'] = $user['email'];
         $_SESSION['logistics_prvg'] = (int) $user['prvg'] === 1 ? 1 : 2;
+        $_SESSION['logistics_must_change_password'] = (int) $user['must_change_password'] === 1;
+        unset($_SESSION['logistics_driver_id']);
 
+        Permission::flush();
         AuditLog::record('auth.login', 'user', (string) $user['id']);
+        Notifier::refreshOperationalAlerts();
 
+        if ($_SESSION['logistics_must_change_password']) {
+            Flash::warning('Your account still uses a one-time password. Please set a new one now.');
+            header('Location: ' . \url(['account', 'password'], ['forced' => 1]));
+            exit;
+        }
+
+        Flash::success('Welcome back, ' . $user['full_name'] . '.');
         header('Location: ' . \url('dashboard'));
         exit;
     }
@@ -61,21 +92,104 @@ class HomeController
     {
         AuditLog::record('auth.logout', 'user', \current_user_id() !== null ? (string) \current_user_id() : null);
 
-        unset(
-            $_SESSION['logistics_authenticated'],
-            $_SESSION['logistics_role'],
-            $_SESSION['logistics_user_id'],
-            $_SESSION['logistics_user_name'],
-            $_SESSION['logistics_user_email'],
-            $_SESSION['logistics_prvg']
-        );
+        $_SESSION = [];
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_regenerate_id(true);
+        }
 
         $this->redirectHome('logged_out=1');
     }
 
-    private function redirectHome(string $query = ''): void
+    /**
+     * Starts a password reset. The token is shown on screen because this install
+     * has no mail transport configured; wire it to email before production use.
+     */
+    public function forgotPassword(): void
     {
-        header('Location: ' . \url('') . ($query === '' ? '' : '?' . $query));
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            \view('auth/forgot', ['title' => 'Reset your password', 'token' => null, 'sent' => false]);
+            return;
+        }
+
+        if (!Csrf::check()) {
+            \view('auth/forgot', ['title' => 'Reset your password', 'token' => null, 'sent' => false, 'error' => 'Your security token expired. Please try again.']);
+            return;
+        }
+
+        $email = trim((string) ($_POST['email'] ?? ''));
+        $repository = new UserRepository();
+        $user = $repository->findActiveByEmail($email);
+
+        $token = null;
+        if ($user !== null) {
+            $token = $repository->createResetToken((int) $user['id']);
+            AuditLog::record('auth.reset_requested', 'user', (string) $user['id'], null, ['email' => $email]);
+        }
+
+        // The same answer either way, so the form cannot be used to discover accounts.
+        \view('auth/forgot', [
+            'title' => 'Reset your password',
+            'token' => $token,
+            'sent' => true,
+            'email' => $email,
+        ]);
+    }
+
+    public function resetPassword(array $params): void
+    {
+        $token = (string) ($params['token'] ?? '');
+        $repository = new UserRepository();
+
+        if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+            \view('auth/reset', ['title' => 'Choose a new password', 'token' => $token, 'error' => null]);
+            return;
+        }
+
+        if (!Csrf::check()) {
+            \view('auth/reset', ['title' => 'Choose a new password', 'token' => $token, 'error' => 'Your security token expired. Please try again.']);
+            return;
+        }
+
+        $password = (string) ($_POST['password'] ?? '');
+        $confirm = (string) ($_POST['password_confirmation'] ?? '');
+        $error = $this->passwordProblem($password, $confirm);
+
+        if ($error !== null) {
+            \view('auth/reset', ['title' => 'Choose a new password', 'token' => $token, 'error' => $error]);
+            return;
+        }
+
+        $userId = $repository->consumeResetToken($token);
+        if ($userId === null) {
+            \view('auth/reset', ['title' => 'Choose a new password', 'token' => $token, 'error' => 'This reset link is invalid or has already been used.']);
+            return;
+        }
+
+        $repository->setPassword($userId, $password, false);
+        AuditLog::record('auth.password_reset', 'user', (string) $userId);
+
+        Flash::success('Your password was changed. Please sign in with the new one.');
+        $this->redirectHome('#login');
+    }
+
+    /** The one place password rules are defined, used by reset and by the account page. */
+    public static function passwordProblem(string $password, string $confirm): ?string
+    {
+        return match (true) {
+            strlen($password) < 10 => 'The new password must be at least 10 characters long.',
+            $password !== $confirm => 'The two passwords do not match.',
+            preg_match('/[a-z]/', $password) !== 1 => 'The new password needs at least one lower-case letter.',
+            preg_match('/[A-Z]/', $password) !== 1 => 'The new password needs at least one capital letter.',
+            preg_match('/\d/', $password) !== 1 => 'The new password needs at least one digit.',
+            in_array(strtolower($password), ['password', 'password123', 'logistics1'], true) => 'That password is too easy to guess.',
+            default => null,
+        };
+    }
+
+    private function redirectHome(string $query = ''): never
+    {
+        $suffix = $query === '' ? '' : (str_starts_with($query, '#') ? $query : '?' . $query);
+        header('Location: ' . \url('') . $suffix);
         exit;
     }
 }

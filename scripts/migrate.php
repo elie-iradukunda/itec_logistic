@@ -103,13 +103,22 @@ foreach ($files as $file) {
     }
 }
 
-$seedPath = __DIR__ . '/../database/seed.sql';
-try {
-    $root->exec($prepareSql($seedPath, $db['name']));
-    echo "Loaded database/seed.sql\n";
-} catch (Throwable $exception) {
-    fwrite(STDERR, "Failed seed: {$exception->getMessage()}\n");
-    exit(1);
+$seedFiles = [
+    __DIR__ . '/../database/seed.sql',
+    __DIR__ . '/../database/seed_company_scenario.sql',
+    __DIR__ . '/../database/seed_extended.sql',
+    __DIR__ . '/../database/seed_accounting.sql',
+];
+
+foreach ($seedFiles as $seedPath) {
+    $relativePath = 'database/' . basename($seedPath);
+    try {
+        $root->exec($prepareSql($seedPath, $db['name']));
+        echo "Loaded {$relativePath}\n";
+    } catch (Throwable $exception) {
+        fwrite(STDERR, "Failed {$relativePath}: {$exception->getMessage()}\n");
+        exit(1);
+    }
 }
 
 if (in_array('--demo', $argv ?? [], true)) {
@@ -120,6 +129,31 @@ if (in_array('--demo', $argv ?? [], true)) {
         fwrite(STDERR, "Failed demo seed: {$exception->getMessage()}\n");
         exit(1);
     }
+}
+
+// The seeds load operations, not accounting entries. Posting them here means the
+// books have something in them the first time anyone opens them, instead of an
+// empty ledger and a trial balance of nothing.
+try {
+    // bootstrap.php declares helper functions, and this script can be required
+    // twice in one process by tests/migrate_fresh.php.
+    if (!function_exists('config')) {
+        require_once __DIR__ . '/../bootstrap.php';
+    }
+
+    $posted = Models\Posting::syncAll();
+    $total = array_sum($posted);
+    echo $total === 0
+        ? "Ledger already up to date.\n"
+        : "Posted {$total} document(s) to the ledger.\n";
+
+    if (!Models\Ledger::isBalanced()) {
+        fwrite(STDERR, "Warning: the ledger does not balance. Open the trial balance before relying on the books.\n");
+    }
+} catch (Throwable $exception) {
+    // A database that has not reached the accounting migrations yet is not an
+    // error; the books simply are not there to post into.
+    fwrite(STDERR, "Ledger not posted: {$exception->getMessage()}\n");
 }
 
 echo "Database setup complete.\n";

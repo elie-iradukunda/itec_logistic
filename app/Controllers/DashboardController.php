@@ -29,7 +29,7 @@ class DashboardController
             'charts' => ChartData::forRole($role, $userId),
             'attention' => ChartData::attention($role, $userId),
             'role' => $role,
-            'denied' => ($_GET['denied'] ?? '') === '1',
+            'denied' => preg_match('/^[a-z_]{0,40}$/', (string) ($_GET['denied'] ?? '')) === 1 ? (string) ($_GET['denied'] ?? '') : '',
             'recentTrips' => ChartData::recentTrips($userId, $role),
             'pageScripts' => ['/assets/js/vendor/apexcharts-3.54.1.min.js', '/assets/js/lms-charts.js'],
         ]);
