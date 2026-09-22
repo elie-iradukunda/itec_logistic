@@ -127,7 +127,6 @@ day's work and close a delivery. Scoped exactly like the web screens.
 | `tests/seed_integrity.php` | Seeds are idempotent; derived totals are correct; the ledger and item balances agree; no duplicate references |
 | `tests/workflow.php` | Every transition, every guard, every side effect, the stock ledger, invoice totals and trip profitability |
 | `tests/security.php` | CSRF, lockout, password rules, reset tokens, driver scoping, SQL identifier allowlists, upload validation |
-| `tests/company_scenario.php` | The Kigali Fresh Foods walkthrough across all seven roles |
 | `tests/http.php` | Boots a server and walks every page, form, report and API endpoint; checks CSRF refusal, permission denial and path traversal |
 
 Run them all:
@@ -138,7 +137,6 @@ C:\xampp\php\php.exe tests\smoke.php
 C:\xampp\php\php.exe tests\seed_integrity.php
 C:\xampp\php\php.exe tests\workflow.php
 C:\xampp\php\php.exe tests\security.php
-C:\xampp\php\php.exe tests\company_scenario.php
 C:\xampp\php\php.exe tests\http.php
 ```
 
