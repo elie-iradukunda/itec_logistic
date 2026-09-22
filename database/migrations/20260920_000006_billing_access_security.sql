@@ -177,11 +177,11 @@ INSERT INTO permissions (permission_key, permission_label, permission_group, sor
 ON DUPLICATE KEY UPDATE permission_label = VALUES(permission_label), permission_group = VALUES(permission_group), sort_order = VALUES(sort_order);
 
 INSERT INTO company_settings (setting_key, setting_value, setting_label, setting_group, input_type) VALUES
-('company_name', 'Kigali Fresh Foods Ltd', 'Company name', 'Company', 'text'),
-('company_tin', '102938475', 'TIN number', 'Company', 'text'),
-('company_phone', '+250 788 000 000', 'Phone', 'Company', 'text'),
-('company_email', 'operations@kigalifresh.rw', 'Email', 'Company', 'text'),
-('company_address', 'KN 5 Rd, Kigali, Rwanda', 'Address', 'Company', 'text'),
+('company_name', '', 'Company name', 'Company', 'text'),
+('company_tin', '', 'TIN number', 'Company', 'text'),
+('company_phone', '', 'Phone', 'Company', 'text'),
+('company_email', '', 'Email', 'Company', 'text'),
+('company_address', '', 'Address', 'Company', 'text'),
 ('currency_code', 'RWF', 'Currency code', 'Finance', 'text'),
 ('currency_symbol', 'RWF', 'Currency symbol', 'Finance', 'text'),
 ('tax_rate', '18', 'Default VAT rate (%)', 'Finance', 'number'),
