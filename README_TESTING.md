@@ -21,7 +21,6 @@ Expected output, ending with:
 
 ```text
 Loaded database/seed.sql
-Loaded database/seed_company_scenario.sql
 Loaded database/seed_extended.sql
 Database setup complete.
 ```
@@ -998,7 +997,6 @@ C:\xampp\php\php.exe tests\smoke.php
 C:\xampp\php\php.exe tests\workflow.php
 C:\xampp\php\php.exe tests\security.php
 C:\xampp\php\php.exe tests\seed_integrity.php
-C:\xampp\php\php.exe tests\company_scenario.php
 ```
 
 ## Putting the data back
