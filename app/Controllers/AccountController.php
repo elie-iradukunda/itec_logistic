@@ -6,6 +6,7 @@ namespace Controllers;
 
 use Core\Flash;
 use Models\AuditLog;
+use Models\Avatar;
 use Models\UserRepository;
 
 /**
@@ -48,11 +49,37 @@ final class AccountController
         // An unticked checkbox is simply absent from the request.
         $notifyByEmail = ($_POST['notify_by_email'] ?? '0') === '1';
 
-        $repository->updateProfile($userId, $fullName, $phone, $jobTitle, $notifyByEmail);
+        $existingPhoto = Avatar::forUser($userId);
+        $photo = $existingPhoto;
+        $photoNote = '';
+
+        if (($_POST['remove_photo'] ?? '') === '1') {
+            Avatar::forget($existingPhoto);
+            $photo = null;
+            $photoNote = ' Your photo was removed.';
+        } else {
+            $stored = Avatar::store($_FILES['avatar'] ?? null, $existingPhoto);
+            if ($stored['error'] !== null) {
+                // The name and the rest are still saved: losing a typed change
+                // because a photo was the wrong format helps nobody.
+                $repository->updateProfile($userId, $fullName, $phone, $jobTitle, $notifyByEmail, $existingPhoto);
+                $_SESSION['logistics_user_name'] = $fullName;
+                Flash::error($stored['error']);
+                header('Location: ' . \url('account'));
+                exit;
+            }
+            if ($stored['path'] !== $existingPhoto) {
+                $photoNote = ' Your photo was updated.';
+            }
+            $photo = $stored['path'];
+        }
+
+        $repository->updateProfile($userId, $fullName, $phone, $jobTitle, $notifyByEmail, $photo);
         $_SESSION['logistics_user_name'] = $fullName;
+        $_SESSION['logistics_user_avatar'] = $photo;
 
         AuditLog::record('account.profile_updated', 'users', (string) $userId);
-        Flash::success('Your profile was updated.');
+        Flash::success('Your profile was updated.' . $photoNote);
 
         header('Location: ' . \url('account'));
         exit;

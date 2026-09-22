@@ -155,16 +155,24 @@ try {
     $test->assert($cancelled['ok'], 'cancelling with a reason succeeds');
 
     // ---------------------------------------------------- expense approval
+    test_sign_in($accounts['driver'], 'driver', 2);
     $expenseId = Models\LogisticsData::save('expenses', null, [
         'reference_code' => 'EXP-WF-001',
         'category' => 'Allowance',
         'amount' => '45000',
         'expense_date' => date('Y-m-d'),
         'trip_id' => (string) $tripId,
-        'submitted_by' => (string) $accounts['driver']['id'],
         'status' => 'pending',
         'payment_method' => 'cash',
     ]);
+    test_sign_in($accounts['super_admin'], 'super_admin', 1);
+
+    $test->same(
+        (int) $accounts['driver']['id'],
+        (int) $scalar('SELECT submitted_by FROM expenses WHERE id = ?', [$expenseId]),
+        'a claim is filed under whoever was signed in, not whoever the form named'
+    );
+
     $approved = Models\Workflow::apply('expenses', $expenseId, 'approve');
     $test->assert($approved['ok'], 'a pending expense can be approved');
     $test->assert($scalar('SELECT approved_by FROM expenses WHERE id = ?', [$expenseId]) !== null, 'the approver is recorded on the expense');

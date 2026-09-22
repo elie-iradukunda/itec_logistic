@@ -257,7 +257,7 @@ final class XlsxWriter
             $merges[] = 'A1:' . $titleSpan . '1';
         }
 
-        foreach ([[$doc['company'], 1], [$doc['title'], 2], [$doc['period'], 3]] as [$text, $style]) {
+        foreach ([[$doc['company'], 1], [$doc['company_details'] ?? '', 3], [$doc['title'], 2], [$doc['period'], 3]] as [$text, $style]) {
             if ($text === '' || $text === null) {
                 continue;
             }

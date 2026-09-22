@@ -22,6 +22,7 @@ final class FileController
         'jpg' => 'image/jpeg',
         'jpeg' => 'image/jpeg',
         'webp' => 'image/webp',
+        'gif' => 'image/gif',
         'doc' => 'application/msword',
         'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'xls' => 'application/vnd.ms-excel',
@@ -61,6 +62,37 @@ final class FileController
         header('Content-Disposition: ' . ($inline ? 'inline' : 'attachment') . '; filename="' . basename($path) . '"');
         header('X-Content-Type-Options: nosniff');
         header('Cache-Control: private, max-age=600');
+        readfile($path);
+        exit;
+    }
+
+    /**
+     * Serves a profile photograph.
+     *
+     * It goes through this route rather than sitting under public/ because a
+     * staff photograph is not something to leave on a guessable public address:
+     * anyone signed in may see a colleague's face, and nobody else may.
+     */
+    public function avatar(array $params): void
+    {
+        $name = (string) ($params['name'] ?? '');
+        $path = \Models\Avatar::resolve($name);
+
+        if ($path === null || !is_file($path)) {
+            $this->fail(404, 'No photo there.');
+        }
+
+        $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        if (!isset(self::MIME[$extension])) {
+            $this->fail(404, 'No photo there.');
+        }
+
+        header('Content-Type: ' . self::MIME[$extension]);
+        header('Content-Length: ' . filesize($path));
+        header('Content-Disposition: inline; filename="' . basename($path) . '"');
+        header('X-Content-Type-Options: nosniff');
+        // A face does not change often, and it is on every page.
+        header('Cache-Control: private, max-age=86400');
         readfile($path);
         exit;
     }

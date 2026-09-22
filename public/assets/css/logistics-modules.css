@@ -218,3 +218,66 @@ body.dark{--lms-line:#3a4149;--lms-muted:#a8b2bb;--lms-ink:#e7ecf0;--lms-surface
 /* save bar moved to the top of the settings form: same look as the bottom
    action bar elsewhere, but static and sitting above the tabs, not sticky */
 .lms-form-bar-top{position:static;box-shadow:none;margin:0 0 14px;border-top:0;border:1px solid var(--lms-line)}
+
+/* ---------------------------------------------------------------- profile photo
+   Everyone used to be shown the same stock photograph a theme shipped with, so
+   the face in the corner belonged to a stranger. A person can now upload their
+   own; an account without one shows its own initials, tinted from the name so
+   the same person is always the same colour. */
+.lms-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: .5px;
+  border-radius: 50%;
+  width: 100%;
+  height: 100%;
+  font-size: .78rem;
+  line-height: 1;
+  /* The tint comes from the name, so it is set inline rather than here. */
+}
+
+.lms-initials-lg {
+  font-size: 1.6rem;
+  letter-spacing: 1px;
+}
+
+.lms-photo-row {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 0 0 20px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--lms-border, #e9edf1);
+}
+
+.lms-photo-current {
+  width: 84px;
+  height: 84px;
+  flex: 0 0 84px;
+}
+
+.lms-photo-img {
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: #f2f5f8;
+  border: 2px solid var(--lms-border, #e9edf1);
+}
+
+.lms-photo-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.lms-photo-actions label {
+  cursor: pointer;
+}
+
+@media (max-width: 575.98px) {
+  .lms-photo-row { flex-direction: column; align-items: flex-start; }
+}

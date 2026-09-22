@@ -29,8 +29,8 @@ final class Schema
     public const VEHICLE_STATUS = ['available' => 'Available', 'on_trip' => 'On trip', 'maintenance' => 'Maintenance', 'inactive' => 'Inactive'];
     public const DRIVER_STATUS = ['available' => 'Available', 'on_trip' => 'On trip', 'off_duty' => 'Off duty', 'inactive' => 'Inactive'];
     public const TRIP_STATUS = ['requested' => 'Requested', 'approved' => 'Approved', 'loading' => 'Loading', 'in_transit' => 'In transit', 'delivered' => 'Delivered', 'cancelled' => 'Cancelled'];
-    public const REQUEST_STATUS = ['pending' => 'Pending', 'approved' => 'Approved', 'assigned' => 'Assigned', 'rejected' => 'Rejected', 'cancelled' => 'Cancelled'];
-    public const DELIVERY_STATUS = ['loading' => 'Loading', 'in_transit' => 'In transit', 'delivered' => 'Delivered', 'failed' => 'Failed'];
+    public const REQUEST_STATUS = ['pending' => 'Pending', 'quoted' => 'Quoted', 'approved' => 'Approved', 'assigned' => 'Assigned', 'rejected' => 'Rejected', 'cancelled' => 'Cancelled'];
+    public const DELIVERY_STATUS = ['loading' => 'Loading', 'in_transit' => 'In transit', 'at_destination' => 'At destination', 'delivered' => 'Delivered', 'failed' => 'Failed'];
     public const SHIPMENT_STATUS = ['draft' => 'Draft', 'booked' => 'Booked', 'loaded' => 'Loaded', 'in_transit' => 'In transit', 'delivered' => 'Delivered', 'returned' => 'Returned', 'cancelled' => 'Cancelled'];
     public const STOCK_STATUS = ['in_stock' => 'In stock', 'reorder' => 'Reorder', 'out_of_stock' => 'Out of stock'];
     public const PURCHASE_STATUS = ['draft' => 'Draft', 'quotation' => 'Quotation', 'approved' => 'Approved', 'received' => 'Received', 'rejected' => 'Rejected'];
@@ -428,12 +428,13 @@ final class Schema
                 'code' => 'reference_code',
                 'order' => 'r.id DESC',
                 'joins' => 'LEFT JOIN users u ON u.id = r.requester_id LEFT JOIN customers c ON c.id = r.customer_id LEFT JOIN trips t ON t.id = r.trip_id LEFT JOIN users ap ON ap.id = r.approved_by',
-                'select' => ['r.id', 'r.reference_code', 'u.full_name AS requester', 'c.customer_name AS customer', 'r.pickup_location', 'r.destination', 'r.required_date', 'r.priority', 'r.status', 'r.weight_kg', 't.reference_code AS trip', 'ap.full_name AS approver'],
+                'select' => ['r.id', 'r.reference_code', 'r.requested_by_contact', 'u.full_name AS requester', 'c.customer_name AS customer', 'r.pickup_location', 'r.destination', 'r.required_date', 'r.priority', 'r.status', 'r.weight_kg', 't.reference_code AS trip', 'ap.full_name AS approver'],
                 'search' => ['r.reference_code', 'r.pickup_location', 'r.destination', 'r.cargo_description', 'c.customer_name'],
                 'list' => [
                     'reference_code' => ['label' => 'Request', 'type' => 'code'],
                     'customer' => ['label' => 'Customer', 'empty' => 'Internal'],
-                    'requester' => ['label' => 'Requested by'],
+                    'requested_by_contact' => ['label' => 'Asked for by', 'empty' => 'Not named'],
+                    'requester' => ['label' => 'Logged by'],
                     'pickup_location' => ['label' => 'From'],
                     'destination' => ['label' => 'To'],
                     'required_date' => ['label' => 'Required', 'type' => 'expiry'],
@@ -446,23 +447,34 @@ final class Schema
                     'priority' => ['label' => 'Priority', 'column' => 'r.priority', 'options' => self::PRIORITY],
                 ],
                 'sections' => [
-                    ['title' => 'Request', 'icon' => 'clipboard', 'fields' => ['reference_code', 'requester_id', 'customer_id', 'priority']],
-                    ['title' => 'Route and date', 'icon' => 'map-pin', 'fields' => ['pickup_location', 'destination', 'required_date']],
-                    ['title' => 'Cargo', 'icon' => 'package', 'hint' => 'Used to pick a vehicle with enough capacity.', 'fields' => ['cargo_description', 'weight_kg', 'packages_count']],
+                    ['title' => 'Request', 'icon' => 'clipboard', 'fields' => ['reference_code', 'customer_id', 'requested_by_contact', 'requester_id', 'priority']],
+                    ['title' => 'Route and date', 'icon' => 'map-pin', 'fields' => ['origin_warehouse_id', 'destination_warehouse_id', 'pickup_location', 'destination', 'required_date']],
+                    ['title' => 'The quotation', 'icon' => 'tag', 'hint' => 'Filled in by the Quote button and emailed to the customer.', 'fields' => ['quoted_amount', 'currency', 'quote_basis', 'accepted_by', 'accepted_at']],
+                    ['title' => 'Cargo', 'icon' => 'package', 'hint' => 'Used to pick a vehicle with enough capacity.', 'fields' => ['cargo_description', 'weight_kg', 'packages_count', 'stock_item_id', 'stock_quantity']],
                     ['title' => 'Decision', 'icon' => 'check-circle', 'hint' => 'Use the Approve and Reject buttons instead of editing the status by hand.', 'fields' => ['status', 'notes']],
                 ],
                 'fields' => [
                     'reference_code' => ['label' => 'Request reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'REQ'],
-                    'requester_id' => ['label' => 'Requested by', 'type' => 'relation', 'width' => 4, 'readonly' => true, 'readonly_note' => 'you', 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Whoever is signed in when the request is raised. It is recorded, not chosen.'],
+                    'requester_id' => ['label' => 'Logged by', 'type' => 'relation', 'width' => 3, 'readonly' => true, 'readonly_note' => 'you', 'relation' => ['table' => 'users', 'label' => 'full_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Recorded, not chosen.'],
+                    'requested_by_contact' => ['label' => 'Asked for by', 'type' => 'text', 'width' => 3, 'placeholder' => 'Peter Kamau', 'help' => 'Who at the customer asked.'],
                     'customer_id' => ['label' => 'Customer', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'customers', 'label' => 'customer_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Leave blank for an internal movement.'],
                     'priority' => ['label' => 'Priority', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::PRIORITY],
-                    'pickup_location' => ['label' => 'Pickup location', 'type' => 'text', 'required' => true, 'width' => 6, 'placeholder' => 'Kigali Central Warehouse'],
-                    'destination' => ['label' => 'Destination', 'type' => 'text', 'required' => true, 'width' => 6, 'placeholder' => 'Huye Depot'],
+                    'pickup_location' => ['label' => 'Pickup location', 'type' => 'text', 'required' => true, 'width' => 3, 'placeholder' => 'Dar es Salaam'],
+                    'origin_warehouse_id' => ['label' => 'Collect from depot', 'type' => 'relation', 'width' => 3, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => "deleted_at IS NULL AND status = 'active'"], ],
+                    'destination' => ['label' => 'Destination', 'type' => 'text', 'required' => true, 'width' => 3, 'placeholder' => 'Kigali'],
+                    'destination_warehouse_id' => ['label' => 'Deliver to depot', 'type' => 'relation', 'width' => 3, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => "deleted_at IS NULL AND status = 'active'"], ],
                     'required_date' => ['label' => 'Required date', 'type' => 'date', 'required' => true, 'width' => 4],
                     'cargo_description' => ['label' => 'Cargo description', 'type' => 'text', 'width' => 6, 'placeholder' => 'Fortified maize flour, 40 sacks'],
+                    'stock_item_id' => ['label' => 'Item from our stock', 'type' => 'relation', 'width' => 5, 'relation' => ['table' => 'inventory_items', 'label' => 'item_name', 'where' => 'deleted_at IS NULL', 'depends_on' => ['field' => 'origin_warehouse_id', 'column' => 'warehouse_id'], 'empty' => 'Not from our stock'], 'help' => 'Only when the customer is ordering goods we hold.'],
+                    'stock_quantity' => ['label' => 'Quantity wanted', 'type' => 'decimal', 'width' => 3],
                     'weight_kg' => ['label' => 'Estimated weight', 'type' => 'decimal', 'width' => 3, 'suffix' => 'kg'],
                     'packages_count' => ['label' => 'Packages', 'type' => 'number', 'width' => 3],
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::REQUEST_STATUS],
+                    'quoted_amount' => ['label' => 'Quoted price', 'type' => 'money', 'width' => 3, 'readonly' => true, 'readonly_note' => 'from the rate card'],
+                    'currency' => ['label' => 'Quoted in', 'type' => 'select', 'width' => 2, 'options' => Currency::options()],
+                    'quote_basis' => ['label' => 'How it was worked out', 'type' => 'text', 'width' => 7, 'readonly' => true, 'readonly_note' => 'the working'],
+                    'accepted_by' => ['label' => 'Accepted by', 'type' => 'text', 'width' => 4, 'placeholder' => 'Who at the customer agreed it'],
+                    'accepted_at' => ['label' => 'Accepted on', 'type' => 'datetime', 'width' => 4],
                     'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12],
                 ],
                 'related' => [
@@ -472,16 +484,21 @@ final class Schema
                      'empty' => 'No shipment booked against this request yet.'],
                 ],
                 'actions' => [
-                    'approve' => ['label' => 'Approve request', 'to' => 'approved', 'from' => ['pending'], 'tone' => 'success'],
-                    'reject' => ['label' => 'Reject', 'to' => 'rejected', 'from' => ['pending'], 'tone' => 'danger', 'reason' => true],
+                    'quote' => ['label' => 'Quote the customer', 'to' => 'quoted', 'from' => ['pending'], 'tone' => 'primary'],
+                    'approve' => ['label' => 'Customer accepted', 'to' => 'approved', 'from' => ['pending', 'quoted'], 'tone' => 'success'],
+                    'reject' => ['label' => 'Reject', 'to' => 'rejected', 'from' => ['pending', 'quoted'], 'tone' => 'danger', 'reason' => true],
                 ],
                 // Not a status change: it opens the trip form with this request
                 // already in it. The request turns Assigned when that trip is saved.
                 'links' => [
-                    ['label' => 'Plan trip', 'icon' => 'navigation', 'tone' => 'primary',
+                    ['label' => 'Load on a planned trip', 'icon' => 'package', 'tone' => 'primary',
+                     'permission' => 'shipments', 'ability' => 'create', 'when' => ['status' => ['approved', 'assigned']],
+                     'route' => ['shipments', 'create'], 'carry' => ['request_id' => 'id'],
+                     'hint' => 'Books this load onto a trip that is already going that way. One trip carries several customers.'],
+                    ['label' => 'Plan a new trip', 'icon' => 'navigation', 'tone' => 'outline-primary',
                      'permission' => 'trips', 'ability' => 'create', 'when' => ['status' => ['approved']],
                      'route' => ['trips', 'create'], 'carry' => ['request_id' => 'id'],
-                     'hint' => 'Opens a new trip with this request, its customer and its route already filled in.'],
+                     'hint' => 'Only when nothing already planned covers this route.'],
                 ],
             ],
 
@@ -527,7 +544,7 @@ final class Schema
                 ],
                 'fields' => [
                     'reference_code' => ['label' => 'Trip reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'TRP', 'locked_for' => ['driver']],
-                    'request_id' => ['label' => 'Fulfils request', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'transport_requests', 'label' => 'reference_code', 'where' => "status IN ('approved','assigned') AND deleted_at IS NULL"], 'help' => 'Saving this trip marks that request Assigned and links the two.', 'locked_for' => ['driver']],
+                    'request_id' => ['label' => 'Fulfils request', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'transport_requests', 'label' => 'reference_code', 'where' => "status IN ('approved','assigned') AND deleted_at IS NULL"], 'help' => 'Only for a truck hired by one customer. A scheduled run is left blank and customers come aboard as shipments.', 'locked_for' => ['driver']],
                     'customer_id' => ['label' => 'Customer', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'customers', 'label' => 'customer_name', 'where' => 'deleted_at IS NULL'], 'locked_for' => ['driver']],
                     'trip_type' => ['label' => 'Trip type', 'type' => 'select', 'width' => 4, 'options' => ['delivery' => 'Delivery', 'collection' => 'Collection', 'transfer' => 'Transfer', 'return' => 'Return', 'shuttle' => 'Shuttle'], 'locked_for' => ['driver']],
                     'pickup_location' => ['label' => 'Pickup location', 'type' => 'text', 'required' => true, 'width' => 6, 'locked_for' => ['driver']],
@@ -546,6 +563,7 @@ final class Schema
                     'table' => 'trip_stops',
                     'parent' => 'trip_id',
                     'title' => 'Stops on this route',
+                    'hint' => 'Where the truck stops between the two ends: depots it loads or drops at, borders it clears, towns it rests in. Optional, and a straight run needs none.',
                     'sequence' => 'stop_sequence',
                     'columns' => [
                         'stop_type' => ['label' => 'Type', 'type' => 'select', 'options' => ['pickup' => 'Pickup', 'dropoff' => 'Drop-off', 'waypoint' => 'Waypoint', 'checkpoint' => 'Checkpoint']],
@@ -580,6 +598,11 @@ final class Schema
                     'reject' => ['label' => 'Cancel trip', 'to' => 'cancelled', 'from' => ['requested', 'approved', 'loading'], 'tone' => 'danger', 'reason' => true],
                 ],
                 'links' => [
+                    ['label' => 'Load a shipment', 'icon' => 'package', 'tone' => 'outline-primary',
+                     'permission' => 'shipments', 'ability' => 'create',
+                     'when' => ['status' => ['requested', 'approved', 'loading']],
+                     'route' => ['shipments', 'create'], 'carry' => ['trip_id' => 'id'],
+                     'hint' => 'Puts another load on this truck. Each customer gets their own shipment.'],
                     ['label' => 'Record delivery', 'icon' => 'check-square', 'tone' => 'outline-primary',
                      'permission' => 'deliveries', 'ability' => 'create',
                      'when' => ['status' => ['requested', 'approved', 'loading', 'in_transit']],
@@ -597,6 +620,8 @@ final class Schema
                 'button' => 'Book shipment',
                 'table' => 'shipments',
                 'alias' => 's',
+                // Requote only when the route, the weight or the customer moves.
+                'track_changes' => true,
                 'code' => 'shipment_code',
                 'order' => 's.id DESC',
                 'joins' => 'LEFT JOIN customers c ON c.id = s.customer_id LEFT JOIN trips t ON t.id = s.trip_id LEFT JOIN transport_requests r ON r.id = s.request_id',
@@ -619,26 +644,33 @@ final class Schema
                 ],
                 'sections' => [
                     ['title' => 'Shipment', 'icon' => 'package', 'fields' => ['shipment_code', 'customer_id', 'request_id', 'trip_id']],
-                    ['title' => 'Consignee and route', 'icon' => 'map-pin', 'fields' => ['consignee_name', 'consignee_phone', 'origin', 'destination']],
-                    ['title' => 'Cargo', 'icon' => 'box', 'hint' => 'Cold chain and hazardous cargo change which vehicle may carry it.', 'fields' => ['cargo_type', 'cargo_description', 'packages_count', 'weight_kg', 'volume_m3', 'declared_value']],
+                    ['title' => 'Consignee and route', 'icon' => 'map-pin', 'hint' => 'A load that drops part way along finishes there; the truck carries on.', 'fields' => ['consignee_name', 'consignee_phone', 'origin', 'origin_warehouse_id', 'destination', 'destination_warehouse_id']],
+                    ['title' => 'Out of our own stock', 'icon' => 'archive', 'hint' => 'Only when the goods are ours. Dispatching the truck takes them off the depot balance.', 'fields' => ['stock_item_id', 'stock_quantity', 'stock_issued_at']],
+                    ['title' => 'Cargo', 'icon' => 'box', 'hint' => 'Cold chain and hazardous cargo change which vehicle may carry it.', 'fields' => ['cargo_type', 'cargo_description', 'packages_count', 'weight_kg', 'volume_m3', 'declared_value', 'currency']],
                     ['title' => 'Handling conditions', 'icon' => 'thermometer', 'hint' => 'Leave the temperature range blank for ambient cargo.', 'fields' => ['temperature_min_c', 'temperature_max_c', 'is_hazardous', 'status']],
                     ['title' => 'Instructions', 'icon' => 'file-text', 'fields' => ['special_instructions']],
                 ],
                 'fields' => [
                     'shipment_code' => ['label' => 'Shipment reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'SHP'],
-                    'customer_id' => ['label' => 'Customer', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'customers', 'label' => 'customer_name', 'where' => 'deleted_at IS NULL']],
-                    'request_id' => ['label' => 'Source request', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'transport_requests', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL']],
-                    'trip_id' => ['label' => 'Loaded on trip', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => "status NOT IN ('delivered','cancelled') AND deleted_at IS NULL"]],
+                    'customer_id' => ['label' => 'Customer', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'customers', 'label' => 'customer_name', 'where' => 'deleted_at IS NULL', 'fills' => ['consignee_phone' => 'phone', 'currency' => 'currency']]],
+                    'request_id' => ['label' => 'Source request', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'transport_requests', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL', 'fills' => ['customer_id' => 'customer_id', 'consignee_name' => 'requested_by_contact', 'origin' => 'pickup_location', 'destination' => 'destination', 'origin_warehouse_id' => 'origin_warehouse_id', 'destination_warehouse_id' => 'destination_warehouse_id', 'cargo_description' => 'cargo_description', 'weight_kg' => 'weight_kg', 'packages_count' => 'packages_count', 'currency' => 'currency', 'stock_item_id' => 'stock_item_id', 'stock_quantity' => 'stock_quantity']]],
+                    'trip_id' => ['label' => 'Loaded on trip', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => "status NOT IN ('delivered','cancelled') AND deleted_at IS NULL"], 'help' => 'Pick a trip already going that way. Saving this marks the request Assigned.'],
                     'consignee_name' => ['label' => 'Consignee', 'type' => 'text', 'required' => true, 'width' => 4, 'help' => 'Who receives the goods at the destination.'],
                     'consignee_phone' => ['label' => 'Consignee phone', 'type' => 'tel', 'width' => 4],
-                    'origin' => ['label' => 'Origin', 'type' => 'text', 'required' => true, 'width' => 6],
-                    'destination' => ['label' => 'Destination', 'type' => 'text', 'required' => true, 'width' => 6],
+                    'origin' => ['label' => 'Origin', 'type' => 'text', 'required' => true, 'width' => 3],
+                    'origin_warehouse_id' => ['label' => 'Loaded at warehouse', 'type' => 'relation', 'width' => 3, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => "deleted_at IS NULL AND status = 'active'"], ],
+                    'destination' => ['label' => 'Destination', 'type' => 'text', 'required' => true, 'width' => 3],
+                    'destination_warehouse_id' => ['label' => 'Drops at warehouse', 'type' => 'relation', 'width' => 3, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => "deleted_at IS NULL AND status = 'active'"], 'help' => 'Where this load leaves the truck.'],
+                    'stock_item_id' => ['label' => 'Item from our stock', 'type' => 'relation', 'width' => 5, 'relation' => ['table' => 'inventory_items', 'label' => 'item_name', 'where' => 'deleted_at IS NULL', 'depends_on' => ['field' => 'origin_warehouse_id', 'column' => 'warehouse_id'], 'empty' => 'Not from our stock'], 'help' => 'Leave blank when the customer brought the goods themselves.'],
+                    'stock_quantity' => ['label' => 'Quantity issued', 'type' => 'decimal', 'width' => 3, 'help' => 'In the item\'s own unit: 8 tyres, 200 litres.'],
+                    'stock_issued_at' => ['label' => 'Taken off the depot', 'type' => 'datetime', 'width' => 4, 'readonly' => true, 'readonly_note' => 'when the truck left'],
                     'cargo_type' => ['label' => 'Cargo type', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['general' => 'General', 'cold_chain' => 'Cold chain', 'perishable' => 'Perishable', 'fragile' => 'Fragile', 'hazardous' => 'Hazardous', 'bulk' => 'Bulk', 'liquid' => 'Liquid']],
                     'cargo_description' => ['label' => 'Cargo description', 'type' => 'text', 'required' => true, 'width' => 8, 'placeholder' => 'Fortified maize flour, 40 sacks of 25 kg'],
                     'packages_count' => ['label' => 'Packages', 'type' => 'number', 'width' => 3, 'min' => 1],
                     'weight_kg' => ['label' => 'Gross weight', 'type' => 'decimal', 'width' => 3, 'suffix' => 'kg'],
                     'volume_m3' => ['label' => 'Volume', 'type' => 'decimal', 'width' => 3, 'suffix' => 'm3'],
-                    'declared_value' => ['label' => 'Declared value', 'type' => 'money', 'width' => 3],
+                    'declared_value' => ['label' => 'Declared value', 'type' => 'money', 'width' => 3, 'help' => 'What the goods are worth, not what we charge to carry them. Used for insurance and at customs.'],
+                    'currency' => ['label' => 'Currency', 'type' => 'select', 'width' => 3, 'options' => Currency::options(), ],
                     'temperature_min_c' => ['label' => 'Minimum temperature', 'type' => 'decimal', 'width' => 3, 'suffix' => 'C'],
                     'temperature_max_c' => ['label' => 'Maximum temperature', 'type' => 'decimal', 'width' => 3, 'suffix' => 'C'],
                     'is_hazardous' => ['label' => 'Hazardous goods', 'type' => 'checkbox', 'width' => 3],
@@ -650,6 +682,18 @@ final class Schema
                      'sql' => 'SELECT id, delivery_code, recipient_name, status, attempt_number, delivered_at FROM deliveries WHERE shipment_id = :id AND deleted_at IS NULL ORDER BY id',
                      'columns' => ['delivery_code' => 'Delivery', 'recipient_name' => 'Recipient', 'status' => 'Status', 'attempt_number' => 'Attempt', 'delivered_at' => 'Delivered'],
                      'empty' => 'No delivery attempt recorded.'],
+                    // Where this load has physically been, in order. The answer
+                    // to "the customer says it never reached the depot".
+                    ['title' => 'Depots it has been through', 'icon' => 'home', 'permission' => 'warehouses', 'module' => 'warehouses',
+                     'sql' => 'SELECT wc.id, wc.movement_code, w.warehouse_name, wc.direction, wc.reason, wc.weight_kg, t.reference_code AS trip, wc.moved_at, u.full_name AS handled_by
+                                 FROM warehouse_cargo wc
+                                 INNER JOIN warehouses w ON w.id = wc.warehouse_id
+                                 LEFT JOIN trips t ON t.id = wc.trip_id
+                                 LEFT JOIN users u ON u.id = wc.performed_by
+                                WHERE wc.shipment_id = :id
+                                ORDER BY wc.moved_at, wc.id',
+                     'columns' => ['warehouse_name' => 'Depot', 'direction' => 'In or out', 'reason' => 'Why', 'weight_kg' => 'Weight', 'trip' => 'Trip', 'moved_at' => 'When', 'handled_by' => 'Handled by'],
+                     'empty' => 'This load has not been recorded at any depot.'],
                 ],
             ],
 
@@ -685,7 +729,7 @@ final class Schema
                 ],
                 'sections' => [
                     ['title' => 'Delivery', 'icon' => 'check-square', 'fields' => ['delivery_code', 'trip_id', 'shipment_id', 'attempt_number']],
-                    ['title' => 'Recipient', 'icon' => 'user', 'fields' => ['recipient_name', 'recipient_phone', 'destination']],
+                    ['title' => 'Recipient', 'icon' => 'user', 'fields' => ['recipient_name', 'recipient_phone', 'destination', 'destination_warehouse_id']],
                     ['title' => 'Timing and status', 'icon' => 'clock', 'fields' => ['planned_at', 'status', 'delivered_at']],
                     ['title' => 'Proof of delivery', 'icon' => 'camera', 'hint' => 'Uploads are private; only signed-in users with delivery access can open them.', 'fields' => ['proof_file', 'recipient_signature']],
                     ['title' => 'Exception', 'icon' => 'alert-triangle', 'hint' => 'Fill this in only when the delivery failed, then reschedule it.', 'fields' => ['failure_reason', 'failure_notes', 'rescheduled_at']],
@@ -693,11 +737,12 @@ final class Schema
                 'fields' => [
                     'delivery_code' => ['label' => 'Delivery reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'DEL', 'locked_for' => ['driver']],
                     'trip_id' => ['label' => 'Trip', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL'], 'locked_for' => ['driver']],
-                    'shipment_id' => ['label' => 'Shipment', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'shipments', 'label' => 'shipment_code', 'where' => 'deleted_at IS NULL'], 'locked_for' => ['driver']],
+                    'shipment_id' => ['label' => 'Shipment', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'shipments', 'label' => 'shipment_code', 'where' => 'deleted_at IS NULL', 'depends_on' => ['field' => 'trip_id', 'column' => 'trip_id'], 'fills' => ['recipient_name' => 'consignee_name', 'recipient_phone' => 'consignee_phone', 'destination' => 'destination', 'destination_warehouse_id' => 'destination_warehouse_id']], 'locked_for' => ['driver'], 'help' => 'Only the loads on the trip above. Choosing one fills in the recipient below.'],
                     'attempt_number' => ['label' => 'Attempt number', 'type' => 'number', 'width' => 4, 'min' => 1, 'help' => 'Increase when you re-deliver after a failure.', 'locked_for' => ['driver']],
                     'recipient_name' => ['label' => 'Recipient name', 'type' => 'text', 'required' => true, 'width' => 4, 'locked_for' => ['driver']],
                     'recipient_phone' => ['label' => 'Recipient phone', 'type' => 'tel', 'width' => 4, 'locked_for' => ['driver']],
                     'destination' => ['label' => 'Delivery address', 'type' => 'text', 'required' => true, 'width' => 4, 'locked_for' => ['driver']],
+                    'destination_warehouse_id' => ['label' => 'Collected from warehouse', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => "deleted_at IS NULL AND status = 'active'"], 'help' => 'When the customer collects rather than being delivered to.', 'locked_for' => ['driver']],
                     'planned_at' => ['label' => 'Planned for', 'type' => 'datetime', 'width' => 4, 'locked_for' => ['driver']],
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::DELIVERY_STATUS, 'locked_for' => ['driver']],
                     'delivered_at' => ['label' => 'Delivered at', 'type' => 'datetime', 'width' => 4],
@@ -708,8 +753,9 @@ final class Schema
                     'rescheduled_at' => ['label' => 'Rescheduled for', 'type' => 'datetime', 'width' => 4],
                 ],
                 'actions' => [
-                    'complete' => ['label' => 'Mark delivered', 'to' => 'delivered', 'from' => ['loading', 'in_transit'], 'tone' => 'success'],
-                    'fail' => ['label' => 'Record failure', 'to' => 'failed', 'from' => ['loading', 'in_transit'], 'tone' => 'danger', 'reason' => true],
+                    'drop' => ['label' => 'Dropped at warehouse', 'to' => 'at_destination', 'from' => ['loading', 'in_transit'], 'tone' => 'primary'],
+                    'complete' => ['label' => 'Collected / delivered', 'to' => 'delivered', 'from' => ['loading', 'in_transit', 'at_destination'], 'tone' => 'success'],
+                    'fail' => ['label' => 'Record failure', 'to' => 'failed', 'from' => ['loading', 'in_transit', 'at_destination'], 'tone' => 'danger', 'reason' => true],
                 ],
             ],
         ];
@@ -720,6 +766,139 @@ final class Schema
     private static function commercial(): array
     {
         return [
+            'border_posts' => [
+                'title' => 'Border posts',
+                'singular' => 'Border post',
+                'kicker' => 'Cross-border',
+                'icon' => 'flag',
+                'description' => 'The crossings this company actually uses, with how long each one normally takes. The typical hours are for planning a run, and for seeing at a glance when a crossing is going badly.',
+                'button' => 'Add border post',
+                'table' => 'border_posts',
+                'alias' => 'bp',
+                'code' => 'post_name',
+                'order' => 'bp.post_name',
+                'select' => ['bp.id', 'bp.post_name', 'bp.post_code', 'bp.country_a', 'bp.country_b', 'bp.is_one_stop', 'bp.typical_hours', 'bp.contact_phone', 'bp.is_active'],
+                'search' => ['bp.post_name', 'bp.post_code', 'bp.country_a', 'bp.country_b'],
+                'list' => [
+                    'post_name' => ['label' => 'Post', 'type' => 'code'],
+                    'post_code' => ['label' => 'Code', 'empty' => '—'],
+                    'country_a' => ['label' => 'From'],
+                    'country_b' => ['label' => 'To'],
+                    'is_one_stop' => ['label' => 'One stop', 'type' => 'yesno'],
+                    'typical_hours' => ['label' => 'Normally takes', 'type' => 'decimal', 'suffix' => 'h'],
+                    'is_active' => ['label' => 'In use', 'type' => 'yesno'],
+                ],
+                'filters' => ['is_active' => ['label' => 'In use', 'column' => 'bp.is_active', 'options' => [1 => 'Yes', 0 => 'No']]],
+                'sections' => [
+                    ['title' => 'The post', 'icon' => 'flag', 'hint' => 'A one-stop post puts both countries under one roof.', 'fields' => ['post_name', 'post_code', 'country_a', 'country_b', 'is_one_stop', 'typical_hours']],
+                    ['title' => 'Who to call', 'icon' => 'phone', 'fields' => ['contact_name', 'contact_phone', 'is_active']],
+                    ['title' => 'Notes', 'icon' => 'file-text', 'fields' => ['notes']],
+                ],
+                'fields' => [
+                    'post_name' => ['label' => 'Post name', 'type' => 'text', 'required' => true, 'width' => 4, 'placeholder' => 'Gatuna / Katuna'],
+                    'post_code' => ['label' => 'Customs code', 'type' => 'text', 'width' => 2],
+                    'country_a' => ['label' => 'Country this side', 'type' => 'text', 'required' => true, 'width' => 3, 'placeholder' => 'Rwanda'],
+                    'country_b' => ['label' => 'Country the other side', 'type' => 'text', 'required' => true, 'width' => 3, 'placeholder' => 'Uganda'],
+                    'is_one_stop' => ['label' => 'One-stop post', 'type' => 'checkbox', 'width' => 4],
+                    'typical_hours' => ['label' => 'Normally takes', 'type' => 'decimal', 'width' => 4, 'suffix' => 'h', ],
+                    'contact_name' => ['label' => 'Contact', 'type' => 'text', 'width' => 4],
+                    'contact_phone' => ['label' => 'Phone', 'type' => 'tel', 'width' => 4],
+                    'is_active' => ['label' => 'Still used', 'type' => 'checkbox', 'width' => 4],
+                    'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12, 'placeholder' => 'Closes at 18:00. Weighbridge on the Ugandan side only.'],
+                ],
+            ],
+
+            'crossings' => [
+                'title' => 'Border crossings',
+                'singular' => 'Crossing',
+                'kicker' => 'Cross-border',
+                'icon' => 'flag',
+                'description' => 'A truck at a border post: which papers it is waiting on, what was paid to release it, and how long it stood there. The four times are the point of the record — the gaps between them are where a cross-border run loses its money.',
+                'button' => 'Record a crossing',
+                'table' => 'border_crossings',
+                'alias' => 'bc',
+                'code' => 'reference',
+                'order' => 'bc.arrived_at DESC, bc.id DESC',
+                'track_changes' => true,
+                'joins' => 'INNER JOIN border_posts bp ON bp.id = bc.border_post_id LEFT JOIN trips t ON t.id = bc.trip_id LEFT JOIN vehicles v ON v.id = bc.vehicle_id LEFT JOIN drivers d ON d.id = bc.driver_id LEFT JOIN suppliers s ON s.id = bc.clearing_agent_id',
+                'select' => ['bc.id', 'bc.reference', 'bp.post_name', 't.reference_code AS trip', 'v.plate_number AS vehicle', 'd.full_name AS driver', 'bc.direction', 'bc.declaration_no', 'bc.arrived_at', 'bc.departed_at', 'bc.charges_total', 'bc.currency', 'bc.status'],
+                'search' => ['bc.reference', 'bc.declaration_no', 'bc.transit_bond_no', 'bp.post_name', 'v.plate_number'],
+                'scope' => ['driver' => 'bc.driver_id'],
+                'list' => [
+                    'reference' => ['label' => 'Reference', 'type' => 'code'],
+                    'post_name' => ['label' => 'Post'],
+                    'vehicle' => ['label' => 'Vehicle', 'empty' => '—'],
+                    'direction' => ['label' => 'Direction', 'type' => 'label'],
+                    'declaration_no' => ['label' => 'Declaration', 'empty' => 'Not lodged'],
+                    'arrived_at' => ['label' => 'Arrived', 'type' => 'datetime'],
+                    'departed_at' => ['label' => 'Left', 'type' => 'datetime', 'empty' => 'Still there'],
+                    'charges_total' => ['label' => 'Charges', 'type' => 'money'],
+                    'status' => ['label' => 'Status', 'type' => 'badge'],
+                ],
+                'filters' => [
+                    'status' => ['label' => 'Status', 'column' => 'bc.status', 'options' => ['expected' => 'Expected', 'at_border' => 'At the border', 'lodged' => 'Lodged', 'held' => 'Held', 'cleared' => 'Cleared', 'departed' => 'Departed']],
+                    'border_post_id' => ['label' => 'Post', 'column' => 'bc.border_post_id', 'options' => []],
+                    'direction' => ['label' => 'Direction', 'column' => 'bc.direction', 'options' => ['export' => 'Export', 'import' => 'Import', 'transit' => 'Transit']],
+                ],
+                'sections' => [
+                    ['title' => 'The crossing', 'icon' => 'flag', 'hint' => 'Transit means the load is only passing through on its way elsewhere.', 'fields' => ['reference', 'border_post_id', 'direction', 'trip_id', 'shipment_id']],
+                    ['title' => 'Truck and agent', 'icon' => 'truck', 'fields' => ['vehicle_id', 'driver_id', 'clearing_agent_id']],
+                    ['title' => 'Customs references', 'icon' => 'hash', 'fields' => ['declaration_no', 'transit_bond_no', 'seal_no', 'weighbridge_kg']],
+                    ['title' => 'The clock', 'icon' => 'clock', 'hint' => 'Filled in by the buttons above. Type over them only when catching up.', 'fields' => ['arrived_at', 'lodged_at', 'cleared_at', 'departed_at']],
+                    ['title' => 'What it cost', 'icon' => 'dollar-sign', 'hint' => 'Add each charge under Border charges below.', 'fields' => ['charges_total', 'currency']],
+                    ['title' => 'Held or noted', 'icon' => 'alert-triangle', 'fields' => ['status', 'hold_reason', 'notes']],
+                ],
+                'fields' => [
+                    'reference' => ['label' => 'Reference', 'type' => 'text', 'required' => true, 'width' => 3, 'auto' => 'BDR'],
+                    'border_post_id' => ['label' => 'Border post', 'type' => 'relation', 'required' => true, 'width' => 4, 'relation' => ['table' => 'border_posts', 'label' => 'post_name', 'where' => 'deleted_at IS NULL AND is_active = 1']],
+                    'direction' => ['label' => 'Direction', 'type' => 'select', 'required' => true, 'width' => 2, 'options' => ['export' => 'Export', 'import' => 'Import', 'transit' => 'Transit']],
+                    'trip_id' => ['label' => 'On trip', 'type' => 'relation', 'width' => 3, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL'], ],
+                    'shipment_id' => ['label' => 'Shipment', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'shipments', 'label' => 'shipment_code', 'where' => 'deleted_at IS NULL', 'depends_on' => ['field' => 'trip_id', 'column' => 'trip_id']], 'help' => 'Only the loads on the trip above.'],
+                    'vehicle_id' => ['label' => 'Vehicle', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'vehicles', 'label' => 'plate_number', 'where' => 'deleted_at IS NULL']],
+                    'driver_id' => ['label' => 'Driver', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'drivers', 'label' => 'full_name', 'where' => 'deleted_at IS NULL']],
+                    'clearing_agent_id' => ['label' => 'Clearing agent', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'suppliers', 'label' => 'supplier_name', 'where' => "deleted_at IS NULL AND status = 'active'"], ],
+                    'declaration_no' => ['label' => 'Declaration number', 'type' => 'text', 'width' => 3],
+                    'transit_bond_no' => ['label' => 'T1 / bond number', 'type' => 'text', 'width' => 3],
+                    'seal_no' => ['label' => 'Seal number', 'type' => 'text', 'width' => 3],
+                    'weighbridge_kg' => ['label' => 'Weighbridge', 'type' => 'decimal', 'width' => 3, 'suffix' => 'kg'],
+                    'arrived_at' => ['label' => 'Arrived at the post', 'type' => 'datetime', 'width' => 3],
+                    'lodged_at' => ['label' => 'Declaration lodged', 'type' => 'datetime', 'width' => 3],
+                    'cleared_at' => ['label' => 'Released by customs', 'type' => 'datetime', 'width' => 3],
+                    'departed_at' => ['label' => 'Left the post', 'type' => 'datetime', 'width' => 3],
+                    'charges_total' => ['label' => 'Charges', 'type' => 'money', 'width' => 3, 'readonly' => true, 'readonly_note' => 'added from the lines', 'help' => 'Added up from the charge lines.'],
+                    'currency' => ['label' => 'Paid in', 'type' => 'select', 'width' => 3, 'options' => Currency::options(), ],
+                    'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['expected' => 'Expected', 'at_border' => 'At the border', 'lodged' => 'Lodged', 'held' => 'Held', 'cleared' => 'Cleared', 'departed' => 'Departed'], 'readonly' => true, 'readonly_note' => 'set by the buttons above'],
+                    'hold_reason' => ['label' => 'Held because', 'type' => 'text', 'width' => 8, 'readonly' => true, 'readonly_note' => 'from the hold'],
+                    'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12],
+                ],
+                'lines' => [
+                    'table' => 'border_charges',
+                    'parent' => 'crossing_id',
+                    'title' => 'Border charges',
+                    'total_column' => 'charges_total',
+                    'line_amount' => 'amount',
+                    'columns' => [
+                        'charge_type' => ['label' => 'Charge', 'type' => 'select', 'required' => true, 'options' => Lookup::options('border_charge')],
+                        'description' => ['label' => 'Description', 'type' => 'text'],
+                        'receipt_no' => ['label' => 'Receipt', 'type' => 'text'],
+                        'amount' => ['label' => 'Amount', 'type' => 'money'],
+                    ],
+                ],
+                'actions' => [
+                    'arrive' => ['label' => 'Arrived at post', 'to' => 'at_border', 'from' => ['expected'], 'tone' => 'primary'],
+                    'lodge' => ['label' => 'Declaration lodged', 'to' => 'lodged', 'from' => ['at_border', 'held'], 'tone' => 'primary'],
+                    'hold' => ['label' => 'Record a hold', 'to' => 'held', 'from' => ['at_border', 'lodged'], 'tone' => 'danger', 'reason' => true],
+                    'clear' => ['label' => 'Released by customs', 'to' => 'cleared', 'from' => ['lodged', 'held'], 'tone' => 'success'],
+                    'depart' => ['label' => 'Left the post', 'to' => 'departed', 'from' => ['cleared'], 'tone' => 'success'],
+                ],
+                'related' => [
+                    ['title' => 'Papers for this crossing', 'icon' => 'file-text', 'permission' => 'crossings',
+                     'sql' => 'SELECT document_type, document_no, issued_on, expires_on, is_received FROM border_documents WHERE crossing_id = :id ORDER BY is_received, id',
+                     'columns' => ['document_type' => 'Document', 'document_no' => 'Number', 'issued_on' => 'Issued', 'expires_on' => 'Expires', 'is_received' => 'In hand'],
+                     'empty' => 'No papers have been listed for this crossing yet.'],
+                ],
+            ],
+
             'customers' => [
                 'title' => 'Customers',
                 'singular' => 'Customer',
@@ -732,7 +911,7 @@ final class Schema
                 'code' => 'customer_code',
                 'order' => 'c.customer_name',
                 'joins' => '',
-                'select' => ['c.id', 'c.customer_code', 'c.customer_name', 'c.customer_type', 'c.contact_name', 'c.phone', 'c.district', 'c.payment_terms_days', 'c.credit_limit', 'c.status'],
+                'select' => ['c.id', 'c.customer_code', 'c.customer_name', 'c.customer_type', 'c.contact_name', 'c.phone', 'c.district', 'c.payment_terms_days', 'c.credit_limit', 'c.currency', 'c.status'],
                 'search' => ['c.customer_code', 'c.customer_name', 'c.contact_name', 'c.phone', 'c.tin_number'],
                 'list' => [
                     'customer_code' => ['label' => 'Code', 'type' => 'code'],
@@ -751,7 +930,7 @@ final class Schema
                 'sections' => [
                     ['title' => 'Identity', 'icon' => 'briefcase', 'fields' => ['customer_code', 'customer_name', 'customer_type', 'tin_number']],
                     ['title' => 'Contact', 'icon' => 'phone', 'fields' => ['contact_name', 'phone', 'email', 'address', 'district']],
-                    ['title' => 'Commercial terms', 'icon' => 'dollar-sign', 'hint' => 'Payment terms set the due date on every invoice raised for this customer.', 'fields' => ['payment_terms_days', 'credit_limit', 'status']],
+                    ['title' => 'Commercial terms', 'icon' => 'dollar-sign', 'hint' => 'Payment terms set the due date on every invoice raised for this customer.', 'fields' => ['payment_terms_days', 'credit_limit', 'currency', 'status']],
                     ['title' => 'Notes', 'icon' => 'file-text', 'fields' => ['notes']],
                 ],
                 'fields' => [
@@ -765,7 +944,8 @@ final class Schema
                     'address' => ['label' => 'Address', 'type' => 'text', 'width' => 5],
                     'district' => ['label' => 'District', 'type' => 'text', 'width' => 3],
                     'payment_terms_days' => ['label' => 'Payment terms', 'type' => 'number', 'width' => 4, 'suffix' => 'days'],
-                    'credit_limit' => ['label' => 'Credit limit', 'type' => 'money', 'width' => 4],
+                    'credit_limit' => ['label' => 'Credit limit', 'type' => 'money', 'width' => 3],
+                    'currency' => ['label' => 'Currency', 'type' => 'select', 'width' => 2, 'options' => Currency::options(), 'help' => 'What this customer is billed in.'],
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['active' => 'Active', 'on_hold' => 'On hold', 'inactive' => 'Inactive']],
                     'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12],
                 ],
@@ -813,19 +993,25 @@ final class Schema
                 'filters' => ['status' => ['label' => 'Status', 'column' => 'rc.status', 'options' => ['active' => 'Active', 'draft' => 'Draft', 'expired' => 'Expired']]],
                 'sections' => [
                     ['title' => 'Rate', 'icon' => 'tag', 'fields' => ['rate_code', 'customer_id', 'status']],
-                    ['title' => 'Route', 'icon' => 'map-pin', 'hint' => 'Leave the vehicle type blank when the rate applies to any vehicle.', 'fields' => ['origin', 'destination', 'vehicle_type']],
-                    ['title' => 'Pricing', 'icon' => 'dollar-sign', 'fields' => ['rate_type', 'rate_amount', 'minimum_charge']],
+                    ['title' => 'Route', 'icon' => 'map-pin', 'hint' => 'Name the warehouses, not the places. A stop part way along is its own card.', 'fields' => ['origin_warehouse_id', 'destination_warehouse_id', 'origin', 'destination', 'vehicle_type']],
+                    ['title' => 'A full load', 'icon' => 'package', 'hint' => 'The price as you agreed it: a full truck holds this much and costs this. Everything below follows from it.', 'fields' => ['full_load_kg', 'full_load_price', 'currency']],
+                    ['title' => 'Pricing', 'icon' => 'dollar-sign', 'hint' => 'By weight divides the full load above. Per trip charges the same however full the truck is.', 'fields' => ['rate_type', 'rate_amount', 'minimum_charge']],
                     ['title' => 'Validity', 'icon' => 'calendar', 'fields' => ['effective_from', 'effective_to', 'notes']],
                 ],
                 'fields' => [
                     'rate_code' => ['label' => 'Rate reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'RATE'],
                     'customer_id' => ['label' => 'Customer', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'customers', 'label' => 'customer_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Blank means this is the default rate for the route.'],
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['active' => 'Active', 'draft' => 'Draft', 'expired' => 'Expired']],
-                    'origin' => ['label' => 'Origin', 'type' => 'text', 'required' => true, 'width' => 4],
+                    'origin' => ['label' => 'Origin', 'type' => 'text', 'required' => true, 'width' => 4, ],
+                    'origin_warehouse_id' => ['label' => 'Leaves warehouse', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => "deleted_at IS NULL AND status = 'active'"], ],
                     'destination' => ['label' => 'Destination', 'type' => 'text', 'required' => true, 'width' => 4],
-                    'vehicle_type' => ['label' => 'Vehicle type', 'type' => 'select', 'width' => 4, 'options' => Lookup::options('vehicle_type')],
+                    'destination_warehouse_id' => ['label' => 'Arrives at warehouse', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => "deleted_at IS NULL AND status = 'active'"], ],
+                    'vehicle_type' => ['label' => 'Vehicle type', 'type' => 'select', 'width' => 4, 'options' => Lookup::options('vehicle_type'), 'help' => 'Leave blank when the rate applies to any vehicle.'],
+                    'full_load_kg' => ['label' => 'A full load is', 'type' => 'decimal', 'width' => 4, 'suffix' => 'kg', 'placeholder' => '500', ],
+                    'full_load_price' => ['label' => 'A full load costs', 'type' => 'money', 'width' => 4, 'placeholder' => '100000', ],
                     'rate_type' => ['label' => 'Charging basis', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['per_trip' => 'Per trip', 'per_kg' => 'Per kilogram', 'per_m3' => 'Per cubic metre', 'per_package' => 'Per package', 'per_day' => 'Per day']],
-                    'rate_amount' => ['label' => 'Rate amount', 'type' => 'money', 'required' => true, 'width' => 4],
+                    'rate_amount' => ['label' => 'Rate amount', 'type' => 'money', 'width' => 4, 'help' => 'Leave at zero when a full load is filled in above.'],
+                    'currency' => ['label' => 'Currency', 'type' => 'select', 'width' => 4, 'options' => Currency::options(), 'help' => 'Applies to every figure on this card.'],
                     'minimum_charge' => ['label' => 'Minimum charge', 'type' => 'money', 'width' => 4],
                     'effective_from' => ['label' => 'Effective from', 'type' => 'date', 'required' => true, 'width' => 4],
                     'effective_to' => ['label' => 'Effective to', 'type' => 'date', 'width' => 4],
@@ -914,11 +1100,11 @@ final class Schema
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::INVOICE_STATUS],
                     'issue_date' => ['label' => 'Issue date', 'type' => 'date', 'required' => true, 'width' => 4],
                     'due_date' => ['label' => 'Due date', 'type' => 'date', 'required' => true, 'width' => 4],
-                    'subtotal' => ['label' => 'Subtotal', 'type' => 'money', 'width' => 3, 'readonly' => true],
+                    'subtotal' => ['label' => 'Subtotal', 'type' => 'money', 'width' => 3, 'readonly' => true, 'readonly_note' => 'added from the lines'],
                     'tax_rate' => ['label' => 'VAT rate', 'type' => 'decimal', 'width' => 3, 'suffix' => '%'],
-                    'tax_amount' => ['label' => 'VAT amount', 'type' => 'money', 'width' => 3, 'readonly' => true],
-                    'total_amount' => ['label' => 'Total', 'type' => 'money', 'width' => 3, 'readonly' => true],
-                    'amount_paid' => ['label' => 'Amount paid', 'type' => 'money', 'width' => 3, 'readonly' => true],
+                    'tax_amount' => ['label' => 'VAT amount', 'type' => 'money', 'width' => 3, 'readonly' => true, 'readonly_note' => 'subtotal x the rate'],
+                    'total_amount' => ['label' => 'Total', 'type' => 'money', 'width' => 3, 'readonly' => true, 'readonly_note' => 'subtotal plus VAT'],
+                    'amount_paid' => ['label' => 'Amount paid', 'type' => 'money', 'width' => 3, 'readonly' => true, 'readonly_note' => 'added from the payments'],
                     'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12],
                 ],
                 'lines' => [
@@ -982,7 +1168,7 @@ final class Schema
                 'sections' => [
                     ['title' => 'Purchase', 'icon' => 'droplet', 'fields' => ['reference_code', 'vehicle_id', 'station_name', 'fuel_type', 'purchased_at']],
                     ['title' => 'Quantity and price', 'icon' => 'dollar-sign', 'fields' => ['litres', 'unit_price', 'is_full_tank']],
-                    ['title' => 'Odometer', 'icon' => 'activity', 'hint' => 'The number on the dashboard when the tank was filled. It keeps the vehicle record current and catches a reading typed backwards. Litres per 100 km arrives with the distance phase.', 'fields' => ['previous_mileage', 'mileage']],
+                    ['title' => 'Odometer', 'icon' => 'activity', 'hint' => 'The number on the dashboard when the tank was filled.', 'fields' => ['previous_mileage', 'mileage']],
                     ['title' => 'Attribution', 'icon' => 'user', 'fields' => ['driver_id', 'trip_id']],
                     ['title' => 'Receipt', 'icon' => 'paperclip', 'fields' => ['receipt_file', 'notes']],
                 ],
@@ -995,7 +1181,7 @@ final class Schema
                     'litres' => ['label' => 'Litres', 'type' => 'decimal', 'required' => true, 'width' => 4, 'suffix' => 'L'],
                     'unit_price' => ['label' => 'Price per litre', 'type' => 'money', 'required' => true, 'width' => 4],
                     'is_full_tank' => ['label' => 'Tank filled to full', 'type' => 'checkbox', 'width' => 4, 'help' => 'Consumption is only accurate between two full-tank fill-ups.'],
-                    'previous_mileage' => ['label' => 'Previous odometer', 'type' => 'number', 'width' => 4, 'suffix' => 'km', 'readonly' => true, 'help' => 'The highest reading already recorded for this vehicle. You cannot type it.'],
+                    'previous_mileage' => ['label' => 'Previous odometer', 'type' => 'number', 'width' => 4, 'suffix' => 'km', 'readonly' => true, 'readonly_note' => 'last reading on file', 'help' => 'The highest reading already recorded for this vehicle. You cannot type it.'],
                     'mileage' => ['label' => 'Odometer now', 'type' => 'number', 'required' => true, 'width' => 4, 'suffix' => 'km', 'help' => 'Read it off the dashboard at the pump. It cannot be lower than the previous reading.'],
                     'driver_id' => ['label' => 'Driver', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'drivers', 'label' => 'full_name', 'where' => 'deleted_at IS NULL'], 'locked_for' => ['driver'], 'locked_note' => 'you', 'help' => 'Who bought the fuel. A driver recording their own fill-up is filled in automatically.'],
                     'trip_id' => ['label' => 'Trip', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL', 'scope' => ['driver' => "driver_id = :driver_id"]]],
@@ -1034,7 +1220,7 @@ final class Schema
                     'category' => ['label' => 'Category', 'column' => 'e.category', 'options' => Lookup::options('expense_category')],
                 ],
                 'sections' => [
-                    ['title' => 'Expense', 'icon' => 'credit-card', 'fields' => ['reference_code', 'category', 'amount', 'expense_date']],
+                    ['title' => 'Expense', 'icon' => 'credit-card', 'fields' => ['reference_code', 'category', 'amount', 'currency', 'expense_date']],
                     ['title' => 'Attribution', 'icon' => 'link', 'hint' => 'Linking a trip is what lets the cost per trip report work.', 'fields' => ['vehicle_id', 'trip_id', 'submitted_by']],
                     ['title' => 'Approval', 'icon' => 'check-circle', 'hint' => 'Use the Approve and Reject buttons; the approver and time are recorded automatically.', 'fields' => ['status', 'payment_method']],
                     ['title' => 'Evidence', 'icon' => 'paperclip', 'fields' => ['receipt_file', 'notes']],
@@ -1043,6 +1229,7 @@ final class Schema
                     'reference_code' => ['label' => 'Reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'EXP'],
                     'category' => ['label' => 'Category', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => Lookup::options('expense_category')],
                     'amount' => ['label' => 'Amount', 'type' => 'money', 'required' => true, 'width' => 4],
+                    'currency' => ['label' => 'Currency', 'type' => 'select', 'width' => 2, 'options' => Currency::options(), 'help' => 'What the paper actually says.'],
                     'expense_date' => ['label' => 'Expense date', 'type' => 'date', 'required' => true, 'width' => 4],
                     'vehicle_id' => ['label' => 'Vehicle', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'vehicles', 'label' => 'plate_number', 'where' => 'deleted_at IS NULL']],
                     'trip_id' => ['label' => 'Trip', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'trips', 'label' => 'reference_code', 'where' => 'deleted_at IS NULL']],
@@ -1105,7 +1292,34 @@ final class Schema
                     'is_cold_chain' => ['label' => 'Cold chain storage', 'type' => 'checkbox', 'width' => 4],
                 ],
                 'related' => [
-                    ['title' => 'Stock held here', 'icon' => 'package', 'permission' => 'warehouse', 'module' => 'warehouse',
+                    // Two different things sit in a depot and are never added
+                    // together: what the company owns, and what a customer has
+                    // left with us. They get a table each.
+                    ['title' => 'Customer cargo in the shed', 'icon' => 'box', 'permission' => 'shipments', 'module' => 'shipments',
+                     'sql' => "SELECT s.id, s.shipment_code, c.customer_name, s.cargo_description,
+                                      SUM(CASE WHEN wc.direction = 'in' THEN wc.packages ELSE -wc.packages END) AS packages,
+                                      SUM(CASE WHEN wc.direction = 'in' THEN wc.weight_kg ELSE -wc.weight_kg END) AS weight_kg,
+                                      MAX(wc.moved_at) AS since
+                                 FROM warehouse_cargo wc
+                                 INNER JOIN shipments s ON s.id = wc.shipment_id
+                                 LEFT JOIN customers c ON c.id = s.customer_id
+                                WHERE wc.warehouse_id = :id AND s.deleted_at IS NULL
+                                GROUP BY s.id, s.shipment_code, c.customer_name, s.cargo_description
+                               HAVING SUM(CASE WHEN wc.direction = 'in' THEN wc.weight_kg ELSE -wc.weight_kg END) > 0
+                                ORDER BY since DESC",
+                     'columns' => ['shipment_code' => 'Consignment', 'customer_name' => 'Customer', 'cargo_description' => 'Goods', 'packages' => 'Packages', 'weight_kg' => 'Weight', 'since' => 'Here since'],
+                     'empty' => 'No customer cargo is standing here.'],
+                    ['title' => 'Cargo movements', 'icon' => 'repeat', 'permission' => 'shipments',
+                     'sql' => 'SELECT wc.id, wc.movement_code, s.shipment_code, wc.direction, wc.reason, wc.weight_kg, t.reference_code AS trip, wc.moved_at
+                                 FROM warehouse_cargo wc
+                                 INNER JOIN shipments s ON s.id = wc.shipment_id
+                                 LEFT JOIN trips t ON t.id = wc.trip_id
+                                WHERE wc.warehouse_id = :id
+                                ORDER BY wc.moved_at DESC, wc.id DESC
+                                LIMIT 25',
+                     'columns' => ['movement_code' => 'Movement', 'shipment_code' => 'Consignment', 'direction' => 'In or out', 'reason' => 'Why', 'weight_kg' => 'Weight', 'trip' => 'Trip', 'moved_at' => 'When'],
+                     'empty' => 'Nothing has moved through here yet.'],
+                    ['title' => 'Our own stock held here', 'icon' => 'package', 'permission' => 'warehouse', 'module' => 'warehouse',
                      'sql' => 'SELECT id, sku, item_name, quantity, minimum_level, status FROM inventory_items WHERE warehouse_id = :id AND deleted_at IS NULL ORDER BY item_name LIMIT 20',
                      'columns' => ['sku' => 'SKU', 'item_name' => 'Item', 'quantity' => 'On hand', 'minimum_level' => 'Minimum', 'status' => 'Status'],
                      'empty' => 'No stock is held here yet.'],
@@ -1243,7 +1457,7 @@ final class Schema
                 'sections' => [
                     ['title' => 'Request', 'icon' => 'shopping-cart', 'fields' => ['request_code', 'description', 'category', 'requested_by']],
                     ['title' => 'Supplier and delivery', 'icon' => 'truck', 'fields' => ['supplier_id', 'warehouse_id', 'expected_date']],
-                    ['title' => 'Value and approval', 'icon' => 'check-circle', 'hint' => 'Marking the request received posts the line quantities into stock.', 'fields' => ['amount', 'status', 'received_at']],
+                    ['title' => 'Value and approval', 'icon' => 'check-circle', 'hint' => 'Marking it received posts the line quantities into stock.', 'fields' => ['amount', 'currency', 'status', 'received_at']],
                     ['title' => 'Notes', 'icon' => 'file-text', 'fields' => ['notes']],
                 ],
                 'fields' => [
@@ -1255,6 +1469,7 @@ final class Schema
                     'warehouse_id' => ['label' => 'Deliver to warehouse', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'warehouses', 'label' => 'warehouse_name', 'where' => 'deleted_at IS NULL'], 'help' => 'Where received goods will be booked into stock.'],
                     'expected_date' => ['label' => 'Expected date', 'type' => 'date', 'width' => 4],
                     'amount' => ['label' => 'Amount', 'type' => 'money', 'required' => true, 'width' => 4],
+                    'currency' => ['label' => 'Currency', 'type' => 'select', 'width' => 2, 'options' => Currency::options(), 'help' => 'What the paper actually says.'],
                     'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::PURCHASE_STATUS],
                     'received_at' => ['label' => 'Received at', 'type' => 'datetime', 'width' => 4],
                     'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12],
@@ -1409,16 +1624,215 @@ final class Schema
                     'is_active' => ['label' => 'In use', 'column' => 'lv.is_active', 'options' => [1 => 'Yes', 0 => 'No']],
                 ],
                 'sections' => [
-                    ['title' => 'The choice', 'icon' => 'list', 'hint' => 'Whatever you type here is what the drop-down will offer and what the records will store.', 'fields' => ['list_key', 'value', 'sort_order']],
-                    ['title' => 'How it behaves', 'icon' => 'settings', 'hint' => 'Retiring a choice is almost always better than deleting it: the records that already carry it stay readable.', 'fields' => ['label', 'is_active', 'notes']],
+                    ['title' => 'The choice', 'icon' => 'list', 'fields' => ['list_key', 'value', 'sort_order']],
+                    ['title' => 'How it behaves', 'icon' => 'settings', 'hint' => 'Retiring a choice keeps the records that already use it readable.', 'fields' => ['label', 'is_active', 'notes']],
                 ],
                 'fields' => [
                     'list_key' => ['label' => 'Which list', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => self::lookupLists(), 'help' => 'The drop-down this choice will appear in.'],
                     'value' => ['label' => 'Name', 'type' => 'text', 'required' => true, 'width' => 5, 'placeholder' => 'Cement bulker', 'help' => 'Exactly as it should read on the form.'],
-                    'sort_order' => ['label' => 'Position', 'type' => 'number', 'width' => 3, 'help' => 'Lower numbers come first. Leave blank to put it at the end.'],
-                    'label' => ['label' => 'Shown as', 'type' => 'text', 'width' => 4, 'help' => 'Only if the drop-down should read differently from the stored name. Usually left blank.'],
-                    'is_active' => ['label' => 'Offer this choice', 'type' => 'checkbox', 'width' => 4, 'help' => 'Off retires it: existing records keep it, new ones cannot pick it.'],
-                    'notes' => ['label' => 'Notes', 'type' => 'text', 'width' => 4, 'help' => 'Optional — what this choice is for, so the next person does not have to guess.'],
+                    'sort_order' => ['label' => 'Position', 'type' => 'number', 'width' => 3, 'help' => 'Lower numbers come first.'],
+                    'label' => ['label' => 'Shown as', 'type' => 'text', 'width' => 4, 'help' => 'Only if it should read differently. Usually blank.'],
+                    'is_active' => ['label' => 'Offer this choice', 'type' => 'checkbox', 'width' => 4, 'help' => 'Off retires it.'],
+                    'notes' => ['label' => 'Notes', 'type' => 'text', 'width' => 4, ],
+                ],
+            ],
+
+            'cheque_books' => [
+                'title' => 'Cheque books',
+                'singular' => 'Cheque book',
+                'kicker' => 'Money out',
+                'icon' => 'book',
+                'description' => 'The numbered books the bank issued, so the system can offer the next leaf instead of asking anyone to remember it — and so a missing number is visible.',
+                'button' => 'Add cheque book',
+                'table' => 'gl_cheque_books',
+                'alias' => 'cb',
+                'code' => 'id',
+                'order' => 'cb.status, cb.first_no',
+                'joins' => 'LEFT JOIN gl_accounts ga ON ga.id = cb.bank_account_id',
+                'select' => ['cb.id', 'ga.account_name AS bank', 'cb.prefix', 'cb.first_no', 'cb.last_no', 'cb.next_no', 'cb.status', 'cb.notes'],
+                'search' => ['ga.account_name', 'cb.notes', 'cb.prefix'],
+                'list' => [
+                    'bank' => ['label' => 'Drawn on', 'type' => 'code'],
+                    'prefix' => ['label' => 'Prefix', 'empty' => '—'],
+                    'first_no' => ['label' => 'From', 'type' => 'number'],
+                    'last_no' => ['label' => 'To', 'type' => 'number'],
+                    'next_no' => ['label' => 'Next leaf', 'type' => 'number'],
+                    'status' => ['label' => 'Status', 'type' => 'badge'],
+                ],
+                'filters' => ['status' => ['label' => 'Status', 'column' => 'cb.status', 'options' => ['active' => 'Active', 'finished' => 'Finished']]],
+                'sections' => [
+                    ['title' => 'The book', 'icon' => 'book', 'hint' => 'Next leaf only moves forward: a spoiled cheque is spent, not returned.', 'fields' => ['bank_account_id', 'prefix', 'first_no', 'last_no', 'next_no', 'status']],
+                    ['title' => 'Notes', 'icon' => 'file-text', 'fields' => ['notes']],
+                ],
+                'fields' => [
+                    'bank_account_id' => ['label' => 'Drawn on', 'type' => 'relation', 'required' => true, 'width' => 6, 'relation' => ['table' => 'gl_accounts', 'label' => 'account_name', 'where' => 'deleted_at IS NULL AND is_bank = 1 AND is_active = 1'], ],
+                    'prefix' => ['label' => 'Prefix', 'type' => 'text', 'width' => 3, 'placeholder' => 'BK', ],
+                    'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 3, 'options' => ['active' => 'Active', 'finished' => 'Finished']],
+                    'first_no' => ['label' => 'First number', 'type' => 'number', 'required' => true, 'width' => 4],
+                    'last_no' => ['label' => 'Last number', 'type' => 'number', 'required' => true, 'width' => 4],
+                    'next_no' => ['label' => 'Next unused number', 'type' => 'number', 'required' => true, 'width' => 4, 'help' => 'Set it to the first number on a new book.'],
+                    'notes' => ['label' => 'Notes', 'type' => 'textarea', 'width' => 12],
+                ],
+            ],
+
+            'cheques' => [
+                'title' => 'Cheques',
+                'singular' => 'Cheque',
+                'kicker' => 'Money out',
+                'icon' => 'credit-card',
+                'description' => 'Payments made by cheque: which account it is drawn on, which leaf, who it is payable to and what the money is for. Issuing one takes it off the bank and posts it to the ledger; the bank taking it is recorded separately, which is what makes a reconciliation possible.',
+                'button' => 'Write a cheque',
+                'table' => 'gl_cheques',
+                'alias' => 'ch',
+                'code' => 'reference',
+                'order' => 'ch.cheque_date DESC, ch.id DESC',
+                'track_changes' => true,
+                'joins' => 'LEFT JOIN gl_accounts ga ON ga.id = ch.bank_account_id LEFT JOIN suppliers s ON s.id = ch.supplier_id',
+                'select' => ['ch.id', 'ch.reference', 'ch.cheque_no', 'ga.account_name AS bank', 'ch.payee_name', 'ch.cheque_date', 'ch.amount', 'ch.status', 'ch.presented_on'],
+                'search' => ['ch.reference', 'ch.cheque_no', 'ch.payee_name', 'ch.memo'],
+                'list' => [
+                    'reference' => ['label' => 'Reference', 'type' => 'code'],
+                    'cheque_no' => ['label' => 'Leaf', 'empty' => 'Not written'],
+                    'bank' => ['label' => 'Drawn on'],
+                    'payee_name' => ['label' => 'Payable to'],
+                    'cheque_date' => ['label' => 'Dated', 'type' => 'date'],
+                    'amount' => ['label' => 'Amount', 'type' => 'money'],
+                    'presented_on' => ['label' => 'Taken by bank', 'type' => 'date', 'empty' => 'Not yet'],
+                    'status' => ['label' => 'Status', 'type' => 'badge'],
+                ],
+                'filters' => [
+                    'status' => ['label' => 'Status', 'column' => 'ch.status', 'options' => ['draft' => 'Draft', 'issued' => 'Issued', 'presented' => 'Presented', 'void' => 'Void']],
+                    'bank_account_id' => ['label' => 'Bank account', 'column' => 'ch.bank_account_id', 'options' => []],
+                ],
+                'sections' => [
+                    ['title' => 'The cheque', 'icon' => 'credit-card', 'hint' => 'The leaf number comes from the open cheque book. It can be written once.', 'fields' => ['reference', 'bank_account_id', 'cheque_book_id', 'cheque_no', 'cheque_date', 'amount']],
+                    ['title' => 'Payable to', 'icon' => 'user', 'fields' => ['payee_name', 'supplier_id', 'payee_address']],
+                    ['title' => 'What it is for', 'icon' => 'file-text', 'hint' => 'Add the accounts to charge under the lines below, after saving.', 'fields' => ['memo', 'notes']],
+                    ['title' => 'Bank and cancellation', 'icon' => 'check-square', 'fields' => ['status', 'presented_on', 'void_reason']],
+                ],
+                'fields' => [
+                    'reference' => ['label' => 'Reference', 'type' => 'text', 'required' => true, 'width' => 4, 'auto' => 'CHQ'],
+                    'bank_account_id' => ['label' => 'Drawn on', 'type' => 'relation', 'required' => true, 'width' => 4, 'relation' => ['table' => 'gl_accounts', 'label' => 'account_name', 'where' => 'deleted_at IS NULL AND is_bank = 1 AND is_active = 1'], ],
+                    'cheque_book_id' => ['label' => 'From book', 'type' => 'relation', 'width' => 4, 'relation' => ['table' => 'gl_cheque_books', 'label' => 'id', 'where' => "status = 'active' AND deleted_at IS NULL"], ],
+                    'cheque_no' => ['label' => 'Leaf number', 'type' => 'text', 'width' => 4, 'help' => 'Blank takes the next number from the book.'],
+                    'cheque_date' => ['label' => 'Dated', 'type' => 'date', 'required' => true, 'width' => 4],
+                    'amount' => ['label' => 'Amount', 'type' => 'money', 'width' => 4, 'readonly' => true, 'readonly_note' => 'added from the lines', 'help' => 'Added up from the lines below.'],
+                    'payee_name' => ['label' => 'Payable to', 'type' => 'text', 'required' => true, 'width' => 5, 'placeholder' => 'Kigali Auto Care Ltd'],
+                    'supplier_id' => ['label' => 'Supplier on file', 'type' => 'relation', 'width' => 3, 'relation' => ['table' => 'suppliers', 'label' => 'supplier_name', 'where' => 'deleted_at IS NULL']],
+                    'payee_address' => ['label' => 'Address', 'type' => 'text', 'width' => 4],
+                    'memo' => ['label' => 'Memo on the leaf', 'type' => 'text', 'width' => 12, 'placeholder' => 'Tyres, order PR-2026-0001'],
+                    'notes' => ['label' => 'Internal note', 'type' => 'textarea', 'width' => 12],
+                    'status' => ['label' => 'Status', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['draft' => 'Draft', 'issued' => 'Issued', 'presented' => 'Presented', 'void' => 'Void'], 'readonly' => true, 'readonly_note' => 'set by the buttons above'],
+                    'presented_on' => ['label' => 'Taken by the bank on', 'type' => 'date', 'width' => 4, 'help' => 'Filled in from the bank statement, or by the Mark presented button.'],
+                    'void_reason' => ['label' => 'Cancelled because', 'type' => 'text', 'width' => 4, 'readonly' => true, 'readonly_note' => 'from the cancellation'],
+                ],
+                'lines' => [
+                    'table' => 'gl_cheque_lines',
+                    'parent' => 'cheque_id',
+                    'title' => 'What the money is for',
+                    'total_column' => 'amount',
+                    // A cheque line is an amount, not a quantity times a price.
+                    'line_amount' => 'amount',
+                    'columns' => [
+                        'account_id' => ['label' => 'Account', 'type' => 'relation', 'required' => true, 'relation' => ['table' => 'gl_accounts', 'label' => 'account_name', 'where' => 'deleted_at IS NULL AND is_header = 0 AND is_active = 1']],
+                        'description' => ['label' => 'Description', 'type' => 'text'],
+                        'amount' => ['label' => 'Amount', 'type' => 'money'],
+                    ],
+                ],
+                'actions' => [
+                    'issue' => ['label' => 'Issue cheque', 'to' => 'issued', 'from' => ['draft'], 'tone' => 'primary'],
+                    'present' => ['label' => 'Mark presented', 'to' => 'presented', 'from' => ['issued'], 'tone' => 'success'],
+                    'void' => ['label' => 'Void cheque', 'to' => 'void', 'from' => ['draft', 'issued'], 'tone' => 'danger', 'reason' => true],
+                ],
+                'related' => [
+                    ['title' => 'Ledger entry', 'icon' => 'book', 'permission' => 'journal',
+                     'sql' => 'SELECT e.entry_no, e.entry_date, e.memo, a.account_code, a.account_name, l.debit, l.credit
+                                 FROM gl_journal_entries e
+                                 INNER JOIN gl_journal_lines l ON l.entry_id = e.id
+                                 INNER JOIN gl_accounts a ON a.id = l.account_id
+                                WHERE e.source_type = "cheque" AND e.source_id = :id AND e.deleted_at IS NULL
+                                ORDER BY l.line_no',
+                     'columns' => ['entry_no' => 'Entry', 'account_code' => 'Code', 'account_name' => 'Account', 'debit' => 'Debit', 'credit' => 'Credit'],
+                     'empty' => 'Nothing is posted until the cheque is issued.'],
+                ],
+            ],
+
+            'budgets' => [
+                'title' => 'Budget',
+                'singular' => 'Budget line',
+                'kicker' => 'Planning',
+                'icon' => 'target',
+                'description' => 'What each account is expected to earn or cost. Actual figures are never typed here: they are read from the ledger, so Budget versus actual cannot drift from the books.',
+                'button' => 'Add budget line',
+                'table' => 'gl_budgets',
+                'alias' => 'bg',
+                'code' => 'id',
+                'order' => 'bg.fiscal_year DESC, bg.month, ga.account_code',
+                'joins' => 'INNER JOIN gl_accounts ga ON ga.id = bg.account_id',
+                'select' => ['bg.id', 'bg.fiscal_year', 'ga.account_code', 'ga.account_name AS account', 'bg.month', 'bg.amount', 'bg.notes'],
+                'search' => ['ga.account_code', 'ga.account_name', 'bg.notes'],
+                'list' => [
+                    'fiscal_year' => ['label' => 'Year', 'type' => 'code'],
+                    'account_code' => ['label' => 'Code'],
+                    'account' => ['label' => 'Account'],
+                    'month' => ['label' => 'Period', 'map' => self::budgetMonths()],
+                    'amount' => ['label' => 'Budgeted', 'type' => 'money'],
+                    'notes' => ['label' => 'Notes', 'empty' => '—'],
+                ],
+                'filters' => [
+                    'fiscal_year' => ['label' => 'Year', 'column' => 'bg.fiscal_year', 'options' => []],
+                    'month' => ['label' => 'Period', 'column' => 'bg.month', 'options' => self::budgetMonths()],
+                ],
+                'sections' => [
+                    ['title' => 'The line', 'icon' => 'target', 'hint' => 'One figure per account per period.', 'fields' => ['fiscal_year', 'account_id', 'month', 'amount']],
+                    ['title' => 'Notes', 'icon' => 'file-text', 'fields' => ['notes']],
+                ],
+                'fields' => [
+                    'fiscal_year' => ['label' => 'Financial year', 'type' => 'number', 'required' => true, 'width' => 3],
+                    'account_id' => ['label' => 'Account', 'type' => 'relation', 'required' => true, 'width' => 5, 'relation' => ['table' => 'gl_accounts', 'label' => 'account_name', 'where' => 'deleted_at IS NULL AND is_header = 0 AND is_active = 1']],
+                    'month' => ['label' => 'Period', 'type' => 'select', 'required' => true, 'width' => 2, 'options' => self::budgetMonths()],
+                    'amount' => ['label' => 'Budgeted amount', 'type' => 'money', 'required' => true, 'width' => 2],
+                    'notes' => ['label' => 'Notes', 'type' => 'text', 'width' => 12, 'placeholder' => 'Assumes two extra trucks from July'],
+                ],
+                'actions' => [],
+            ],
+
+            'currencies' => [
+                'title' => 'Currencies',
+                'singular' => 'Currency',
+                'kicker' => 'Cross-border',
+                'icon' => 'globe',
+                'description' => 'The money this company handles. One of them is the base: every report and the whole ledger are in that one, and everything else is converted to it at the rate of the day it was spent or charged.',
+                'button' => 'Add currency',
+                'table' => 'currencies',
+                'alias' => 'cu',
+                'code' => 'code',
+                'order' => 'cu.sort_order, cu.code',
+                'select' => ['cu.id', 'cu.code', 'cu.currency_name', 'cu.symbol', 'cu.country', 'cu.decimals', 'cu.is_base', 'cu.is_active', 'cu.sort_order'],
+                'search' => ['cu.code', 'cu.currency_name', 'cu.country'],
+                'list' => [
+                    'code' => ['label' => 'Code', 'type' => 'code'],
+                    'currency_name' => ['label' => 'Currency'],
+                    'symbol' => ['label' => 'Symbol', 'empty' => '—'],
+                    'country' => ['label' => 'Used in', 'empty' => '—'],
+                    'decimals' => ['label' => 'Decimals', 'type' => 'number'],
+                    'is_base' => ['label' => 'Base', 'type' => 'yesno'],
+                    'is_active' => ['label' => 'In use', 'type' => 'yesno'],
+                ],
+                'filters' => ['is_active' => ['label' => 'In use', 'column' => 'cu.is_active', 'options' => [1 => 'Yes', 0 => 'No']]],
+                'sections' => [
+                    ['title' => 'The currency', 'icon' => 'globe', 'hint' => 'The three letters the banks use. Every record stores this, so it does not change.', 'fields' => ['code', 'currency_name', 'symbol', 'country']],
+                    ['title' => 'How it behaves', 'icon' => 'settings', 'hint' => 'Exactly one currency is the base.', 'fields' => ['decimals', 'sort_order', 'is_base', 'is_active']],
+                ],
+                'fields' => [
+                    'code' => ['label' => 'Code', 'type' => 'text', 'required' => true, 'width' => 3, 'placeholder' => 'KES', ],
+                    'currency_name' => ['label' => 'Name', 'type' => 'text', 'required' => true, 'width' => 5, 'placeholder' => 'Kenyan shilling'],
+                    'symbol' => ['label' => 'Symbol', 'type' => 'text', 'width' => 2, 'placeholder' => 'KSh'],
+                    'country' => ['label' => 'Used in', 'type' => 'text', 'width' => 2, 'placeholder' => 'Kenya'],
+                    'decimals' => ['label' => 'Decimal places', 'type' => 'number', 'width' => 3, ],
+                    'sort_order' => ['label' => 'Position', 'type' => 'number', 'width' => 3],
+                    'is_base' => ['label' => 'The books are kept in this', 'type' => 'checkbox', 'width' => 3],
+                    'is_active' => ['label' => 'Offer this currency', 'type' => 'checkbox', 'width' => 3],
                 ],
             ],
 
@@ -1451,24 +1865,24 @@ final class Schema
                     'is_active' => ['label' => 'In use', 'column' => 'pm.is_active', 'options' => [1 => 'Yes', 0 => 'No']],
                 ],
                 'sections' => [
-                    ['title' => 'The method', 'icon' => 'credit-card', 'hint' => 'The name is what everyone sees; the key is what the payment records store and must not change once money has been filed under it.', 'fields' => ['method_name', 'method_key', 'direction']],
-                    ['title' => 'Where the money goes', 'icon' => 'book', 'hint' => 'Money received debits this account; money paid credits it. Without it the ledger falls back to the main current account.', 'fields' => ['gl_account_id', 'sort_order']],
-                    ['title' => 'Account details', 'icon' => 'hash', 'hint' => 'What a customer needs in order to send the money. Fill in the parts that apply: a bank uses the name, branch, account name and number; mobile money uses the network, the pay code and the phone it is registered to.', 'fields' => ['provider_name', 'branch_name', 'account_name', 'account_number', 'swift_code', 'phone_number']],
+                    ['title' => 'The method', 'icon' => 'credit-card', 'hint' => 'The name is what everyone sees. The key is what payments store and never changes.', 'fields' => ['method_name', 'method_key', 'direction']],
+                    ['title' => 'Where the money goes', 'icon' => 'book', 'hint' => 'The account this money moves through in the ledger.', 'fields' => ['gl_account_id', 'sort_order']],
+                    ['title' => 'Account details', 'icon' => 'hash', 'hint' => 'What a customer needs in order to pay. Fill in the parts that apply.', 'fields' => ['provider_name', 'branch_name', 'account_name', 'account_number', 'swift_code', 'phone_number']],
                     ['title' => 'On the invoice', 'icon' => 'file-text', 'fields' => ['payment_details', 'instructions', 'show_on_invoice', 'is_active']],
                 ],
                 'fields' => [
                     'method_name' => ['label' => 'Name', 'type' => 'text', 'required' => true, 'width' => 4, 'placeholder' => 'Bank of Kigali transfer'],
                     'method_key' => ['label' => 'Stored as', 'type' => 'text', 'width' => 4, 'help' => 'Lowercase, no spaces, for example bk_transfer. Leave blank and it is made from the name.'],
                     'direction' => ['label' => 'Used for', 'type' => 'select', 'required' => true, 'width' => 4, 'options' => ['both' => 'Money in and out', 'in' => 'Money received only', 'out' => 'Money paid only']],
-                    'gl_account_id' => ['label' => 'Posts to account', 'type' => 'relation', 'width' => 8, 'relation' => ['table' => 'gl_accounts', 'label' => 'account_name', 'where' => 'deleted_at IS NULL AND is_header = 0 AND is_active = 1'], 'help' => 'The cash, bank or wallet account this money actually moves through.'],
+                    'gl_account_id' => ['label' => 'Posts to account', 'type' => 'relation', 'width' => 8, 'relation' => ['table' => 'gl_accounts', 'label' => 'account_name', 'where' => 'deleted_at IS NULL AND is_header = 0 AND is_active = 1'], ],
                     'sort_order' => ['label' => 'Position', 'type' => 'number', 'width' => 4, 'help' => 'Lower numbers come first in the drop-down.'],
                     'provider_name' => ['label' => 'Bank or network', 'type' => 'text', 'width' => 4, 'placeholder' => 'Bank of Kigali', 'help' => 'For mobile money, the network: MTN Rwanda, Airtel Rwanda.'],
                     'branch_name' => ['label' => 'Branch', 'type' => 'text', 'width' => 4, 'placeholder' => 'Nyarugenge Branch'],
-                    'account_name' => ['label' => 'Account held in the name of', 'type' => 'text', 'width' => 4, 'placeholder' => 'Rwanda Cargo Link Ltd'],
+                    'account_name' => ['label' => 'Account held in the name of', 'type' => 'text', 'width' => 4, 'placeholder' => 'The name on the bank account'],
                     'account_number' => ['label' => 'Account number or pay code', 'type' => 'text', 'width' => 4, 'placeholder' => '000401234567890', 'help' => 'For mobile money, the merchant or pay code.'],
                     'swift_code' => ['label' => 'SWIFT / BIC', 'type' => 'text', 'width' => 4, 'placeholder' => 'BKIGRWRW', 'help' => 'Only needed for payments from outside the country.'],
                     'phone_number' => ['label' => 'Phone number', 'type' => 'tel', 'width' => 4, 'placeholder' => '+250 788 000 001', 'help' => 'The number a mobile money account is registered to.'],
-                    'payment_details' => ['label' => 'Anything else', 'type' => 'text', 'width' => 12, 'placeholder' => 'Quote the invoice number as the reference', 'help' => 'Added after the account details on the invoice. Leave blank unless the fields above do not cover it.'],
+                    'payment_details' => ['label' => 'Anything else', 'type' => 'text', 'width' => 12, 'placeholder' => 'Quote the invoice number as the reference', 'help' => 'Only if the fields above do not cover it.'],
                     'instructions' => ['label' => 'Internal note', 'type' => 'text', 'width' => 12, 'help' => 'Only for your own staff — never shown to a customer.'],
                     'show_on_invoice' => ['label' => 'Show on invoices', 'type' => 'checkbox', 'width' => 6],
                     'is_active' => ['label' => 'Offer this method', 'type' => 'checkbox', 'width' => 6, 'help' => 'Turn it off to retire it. Payments already recorded under it are untouched.'],
@@ -1584,6 +1998,23 @@ final class Schema
      * 'Other income' belongs below the operating result, and a section it has
      * never heard of would have nowhere to go.
      */
+    /**
+     * The periods a budget line can cover.
+     *
+     * Zero is the whole year, which is how most companies budget; the months are
+     * there for the ones that split it, and Budget versus actual adds them up
+     * either way.
+     */
+    private static function budgetMonths(): array
+    {
+        $months = [0 => 'Whole year'];
+        for ($month = 1; $month <= 12; $month++) {
+            $months[$month] = date('F', (int) mktime(0, 0, 0, $month, 1));
+        }
+
+        return $months;
+    }
+
     /** The reference lists a company may edit, named in `Models\Lookup`. */
     private static function lookupLists(): array
     {

@@ -188,16 +188,23 @@ class UserRepository extends BaseModel
         return (int) $row['user_id'];
     }
 
-    public function updateProfile(int $userId, string $fullName, string $phone, string $jobTitle, bool $notifyByEmail = true): void
-    {
+    public function updateProfile(
+        int $userId,
+        string $fullName,
+        string $phone,
+        string $jobTitle,
+        bool $notifyByEmail = true,
+        ?string $avatarPath = null
+    ): void {
         $statement = $this->db->prepare(
-            'UPDATE users SET full_name = ?, phone = ?, job_title = ?, notify_by_email = ? WHERE id = ?'
+            'UPDATE users SET full_name = ?, phone = ?, job_title = ?, notify_by_email = ?, avatar_path = ? WHERE id = ?'
         );
         $statement->execute([
             $fullName,
             $phone === '' ? null : $phone,
             $jobTitle === '' ? null : $jobTitle,
             $notifyByEmail ? 1 : 0,
+            $avatarPath === '' ? null : $avatarPath,
             $userId,
         ]);
     }

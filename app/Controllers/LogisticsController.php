@@ -323,13 +323,62 @@ final class LogisticsController
             }
         }
 
+        // A request is answered either by a trip of its own or by a place on a
+        // trip that is already going that way. The second is the common case —
+        // one truck, several customers — and it is the shipment, not the trip,
+        // that carries the customer. So "Load on a planned trip" opens this form
+        // with everything the request settled, leaving one thing to choose: which
+        // trip. Coming the other way, from a trip page, the trip is the given and
+        // the request is what is chosen.
+        if ($key === 'shipments' && ($_GET['request_id'] ?? '') !== '') {
+            $request = LogisticsData::find('requests', (int) $_GET['request_id'], \current_context());
+            if ($request !== null && in_array((string) $request['status'], ['approved', 'assigned'], true)) {
+                return [
+                    'status' => 'draft',
+                    'cargo_type' => 'general',
+                    'request_id' => $request['id'],
+                    'customer_id' => $request['customer_id'],
+                    'consignee_name' => $request['requested_by_contact'],
+                    'origin' => $request['pickup_location'],
+                    'origin_warehouse_id' => $request['origin_warehouse_id'],
+                    'destination' => $request['destination'],
+                    'destination_warehouse_id' => $request['destination_warehouse_id'],
+                    'cargo_description' => $request['cargo_description'],
+                    'weight_kg' => $request['weight_kg'],
+                    'packages_count' => $request['packages_count'] ?: 1,
+                    'currency' => $request['currency'],
+                    // An order against our own stock carries the item with it,
+                    // so the depot loses the right thing when the truck leaves.
+                    'stock_item_id' => $request['stock_item_id'],
+                    'stock_quantity' => $request['stock_quantity'],
+                    // The trip is deliberately left empty: choosing it is the
+                    // whole point of arriving here.
+                    'trip_id' => (int) ($request['trip_id'] ?? 0) ?: null,
+                ];
+            }
+        }
+
+        if ($key === 'shipments' && ($_GET['trip_id'] ?? '') !== '') {
+            $trip = LogisticsData::find('trips', (int) $_GET['trip_id'], \current_context());
+            if ($trip !== null && !in_array((string) $trip['status'], ['delivered', 'cancelled'], true)) {
+                return [
+                    'status' => 'draft',
+                    'cargo_type' => 'general',
+                    'packages_count' => 1,
+                    'trip_id' => $trip['id'],
+                    'origin' => $trip['pickup_location'],
+                    'destination' => $trip['destination'],
+                ];
+            }
+        }
+
         // "Record delivery" from a trip page opens this form already pointing at
         // that trip — and at the state the trip is actually in, so a delivery
         // added to a truck that has already left is not filed as still loading.
         if ($key === 'deliveries' && ($_GET['trip_id'] ?? '') !== '') {
             $trip = LogisticsData::find('trips', (int) $_GET['trip_id'], \current_context());
             if ($trip !== null && !in_array((string) $trip['status'], ['delivered', 'cancelled'], true)) {
-                return [
+                $defaults = [
                     'trip_id' => $trip['id'],
                     'destination' => $trip['destination'],
                     'planned_at' => $trip['planned_arrival_at'],
@@ -337,6 +386,24 @@ final class LogisticsController
                     'attempt_number' => 1,
                     'failure_reason' => 'none',
                 ];
+
+                // A truck carrying one load leaves nothing to choose, so choose
+                // it — and with it comes the consignee, named once when the load
+                // was booked rather than typed again here. With several loads
+                // the choice is real, so it is left to the user and the browser
+                // fills the rest in behind them.
+                $onBoard = LogisticsData::shipmentsOnTrip((int) $trip['id']);
+
+                if (count($onBoard) === 1) {
+                    $shipment = $onBoard[0];
+                    $defaults['shipment_id'] = $shipment['id'];
+                    $defaults['recipient_name'] = $shipment['consignee_name'];
+                    $defaults['recipient_phone'] = $shipment['consignee_phone'];
+                    $defaults['destination'] = $shipment['destination'] ?: $trip['destination'];
+                    $defaults['destination_warehouse_id'] = $shipment['destination_warehouse_id'];
+                }
+
+                return $defaults;
             }
         }
 
@@ -350,7 +417,7 @@ final class LogisticsController
             'shipments' => ['status' => 'draft', 'cargo_type' => 'general', 'packages_count' => 1],
             'deliveries' => ['status' => 'loading', 'attempt_number' => 1, 'failure_reason' => 'none'],
             'customers' => ['status' => 'active', 'customer_type' => 'corporate', 'payment_terms_days' => \Models\Settings::int('payment_terms_days', 30)],
-            'rates' => ['status' => 'active', 'rate_type' => 'per_trip', 'effective_from' => $today],
+            'rates' => ['status' => 'active', 'rate_type' => 'per_kg', 'rate_amount' => 0, 'effective_from' => $today],
             'invoices' => ['status' => 'draft', 'issue_date' => $today, 'due_date' => date('Y-m-d', strtotime('+' . \Models\Settings::int('payment_terms_days', 30) . ' days')), 'tax_rate' => \Models\Settings::get('tax_rate', '18')],
             'fuel' => ['fuel_type' => 'diesel', 'is_full_tank' => 1, 'purchased_at' => $now],
             'expenses' => ['status' => 'pending', 'expense_date' => $today, 'payment_method' => 'cash', 'submitted_by' => \current_user_id()],

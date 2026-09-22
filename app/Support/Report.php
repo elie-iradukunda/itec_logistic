@@ -39,6 +39,11 @@ final class Report
     {
         return [
             'company' => self::company(),
+            // A printed book leaves the building: it goes to an accountant, a
+            // bank or a tax office, and a page with only a trading name on it
+            // does not say which company it belongs to. The details come from
+            // Settings, so whoever is running this system puts their own there.
+            'company_details' => self::companyDetails(),
             'title' => $title,
             'period' => $period,
             'basis' => $basis ?? Settings::get('accounting_basis', 'Accrual Basis'),
@@ -83,6 +88,29 @@ final class Report
         $text = ($withSymbol ? Settings::get('currency_symbol', 'RWF') . ' ' : '') . $number;
 
         return (float) $value < 0 ? '-' . $text : $text;
+    }
+
+    /**
+     * The line under the company name on an exported page.
+     *
+     * Address, TIN and contact, in the order somebody reading a statement looks
+     * for them, and only the parts that have been filled in. Every one of these
+     * is a Settings field: nothing here names a company.
+     */
+    public static function companyDetails(): string
+    {
+        try {
+            $parts = array_filter([
+                trim((string) Settings::get('company_address', '')),
+                trim((string) Settings::get('company_phone', '')),
+                trim((string) Settings::get('company_email', '')),
+                ($tin = trim((string) Settings::get('company_tin', ''))) !== '' ? 'TIN ' . $tin : '',
+            ], static fn (string $part): bool => $part !== '');
+
+            return implode('  ·  ', $parts);
+        } catch (\Throwable) {
+            return '';
+        }
     }
 
     public static function company(): string

@@ -10,6 +10,21 @@ declare(strict_types=1);
 
 require __DIR__ . '/support.php';
 
+/**
+ * The modules the seed fills.
+ *
+ * Everything else ships empty on purpose: a new company starts with its own
+ * vehicles and its own customers, not with somebody else's. These are the ones
+ * that must arrive with something in them, because they are what a first-time
+ * user needs in order to see how the system fits together.
+ */
+const SEEDED_MODULES = [
+    'vehicles', 'drivers', 'requests', 'trips', 'shipments', 'deliveries',
+    'customers', 'rates', 'fuel', 'warehouses', 'warehouse', 'movements',
+    'procurement', 'suppliers', 'users', 'accounts', 'payment_methods',
+    'currencies', 'lookups', 'border_posts',
+];
+
 [$pdo, $root, $dbName] = test_database('logistics_mvc_seed');
 
 try {
@@ -103,8 +118,12 @@ try {
             $test->assert(isset($listing['rows']), "{$roleKey} can load the {$moduleKey} list");
 
             // A driver legitimately sees only their own rows, so only require
-            // data for the roles that see the whole company.
-            if ($roleKey !== 'driver') {
+            // data for the roles that see the whole company — and only for the
+            // modules the seed actually fills. The demo data was deliberately
+            // cut back to what a new company needs to find its way around, so a
+            // module standing empty is a decision, not a fault. What matters is
+            // that its page opens, which is asserted above.
+            if ($roleKey !== 'driver' && in_array($moduleKey, SEEDED_MODULES, true)) {
                 $test->assert($listing['total'] >= 1, "{$moduleKey} has data for {$roleKey}");
             }
         }

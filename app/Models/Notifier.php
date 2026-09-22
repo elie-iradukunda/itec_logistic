@@ -168,6 +168,10 @@ final class Notifier
             $documentDays = Settings::int('document_alert_days', 30);
             $serviceDays = Settings::int('service_alert_days', 14);
 
+            // Paperwork that lapses grounds a truck, so it reaches the people who
+            // renew it and the people who answer for the fleet standing idle.
+            $fleetAndOwners = ['fleet_manager', 'super_admin', 'management'];
+
             $expiringLicences = $db->prepare(
                 'SELECT full_name, license_expiry FROM drivers
                   WHERE deleted_at IS NULL AND license_expiry IS NOT NULL
@@ -177,7 +181,7 @@ final class Notifier
             foreach ($expiringLicences->fetchAll() as $driver) {
                 self::once(
                     'licence-' . md5($driver['full_name'] . $driver['license_expiry']),
-                    'fleet_manager',
+                    $fleetAndOwners,
                     'Driver licence expiring',
                     sprintf('%s has a licence expiring on %s.', $driver['full_name'], $driver['license_expiry']),
                     'drivers',
@@ -196,7 +200,7 @@ final class Notifier
             foreach ($expiringDocuments->fetchAll() as $document) {
                 self::once(
                     'vehdoc-' . md5((string) $document['document_code'] . $document['expires_on']),
-                    'fleet_manager',
+                    $fleetAndOwners,
                     'Vehicle document expiring',
                     sprintf('%s for %s expires on %s.', ucfirst(str_replace('_', ' ', (string) $document['document_type'])), $document['plate_number'], $document['expires_on']),
                     'vehicle_documents',
@@ -213,7 +217,7 @@ final class Notifier
             foreach ($dueService->fetchAll() as $vehicle) {
                 self::once(
                     'service-' . md5($vehicle['plate_number'] . $vehicle['next_service_date']),
-                    'fleet_manager',
+                    $fleetAndOwners,
                     'Service due',
                     sprintf('%s is due for service on %s.', $vehicle['plate_number'], $vehicle['next_service_date']),
                     'maintenance',
@@ -224,7 +228,7 @@ final class Notifier
             foreach ($db->query('SELECT sku, item_name, quantity, minimum_level FROM inventory_items WHERE deleted_at IS NULL AND quantity <= minimum_level')->fetchAll() as $item) {
                 self::once(
                     'stock-' . md5((string) $item['sku'] . (string) $item['quantity']),
-                    'warehouse_manager',
+                    ['warehouse_manager', 'super_admin'],
                     'Stock below minimum',
                     sprintf('%s is at %s against a minimum of %s.', $item['item_name'], rtrim(rtrim((string) $item['quantity'], '0'), '.'), rtrim(rtrim((string) $item['minimum_level'], '0'), '.')),
                     'warehouse',
@@ -236,7 +240,7 @@ final class Notifier
             foreach ($db->query("SELECT invoice_number, due_date, (total_amount - amount_paid) AS balance FROM invoices WHERE deleted_at IS NULL AND status = 'overdue'")->fetchAll() as $invoice) {
                 self::once(
                     'overdue-' . md5((string) $invoice['invoice_number']),
-                    'finance',
+                    ['finance', 'super_admin', 'management'],
                     'Invoice overdue',
                     sprintf('%s was due on %s with %s outstanding.', $invoice['invoice_number'], $invoice['due_date'], Settings::money((float) $invoice['balance'])),
                     'invoices',
@@ -249,18 +253,33 @@ final class Notifier
     }
 
     /** Inserts only if that key has never been raised, so an alert is not repeated every page load. */
-    private static function once(string $key, string $roleKey, string $title, string $message, ?string $route, string $severity): void
+    /**
+     * Raises an alert once, for everyone it concerns.
+     *
+     * A lapsed licence stops a truck and a lapsed insurance certificate is a
+     * fine at the roadside, so the person who renews it is not the only person
+     * who needs the warning. Each role gets its own row, keyed so the same
+     * expiry is never raised at the same person twice.
+     *
+     * @param string|list<string> $roles
+     */
+    private static function once(string $key, string|array $roles, string $title, string $message, ?string $route, string $severity): void
     {
         $statement = Database::connection()->prepare(
             'INSERT IGNORE INTO notifications (notification_key, user_id, role_key, title, message, link_route, severity)
              VALUES (?, NULL, ?, ?, ?, ?, ?)'
         );
-        $statement->execute([$key, $roleKey, $title, $message, $route, $severity]);
 
-        // Only email an alert the first time it is raised, which is what the
-        // INSERT IGNORE above has just told us.
-        if ($statement->rowCount() > 0 && Settings::int('email_alerts_to_roles', 1) === 1) {
-            self::email($key, null, $roleKey, $title, $message, $route, $severity, 'alert', null, null);
+        foreach (array_unique((array) $roles) as $index => $roleKey) {
+            $roleKey = (string) $roleKey;
+            $rowKey = $index === 0 ? $key : $key . '-' . $roleKey;
+            $statement->execute([$rowKey, $roleKey, $title, $message, $route, $severity]);
+
+            // Only email an alert the first time it is raised, which is what the
+            // INSERT IGNORE above has just told us.
+            if ($statement->rowCount() > 0 && Settings::int('email_alerts_to_roles', 1) === 1) {
+                self::email($rowKey, null, $roleKey, $title, $message, $route, $severity, 'alert', null, null);
+            }
         }
     }
 

@@ -221,6 +221,44 @@ if (isset($columns['gl_journal_lines'])) {
         : $bad(sprintf('the ledger is out by %s — open the trial balance', number_format($difference, 2))) . "\n";
 }
 
+// --------------------------------------------------- doors left open
+//
+// The seed ships with passwords printed in a file that is in the repository.
+// They are right for a system nobody has deployed and wrong the moment it is
+// reachable, so the check belongs here rather than in somebody's memory.
+try {
+    echo "
+Accounts
+";
+    $seeded = ['Admin@123', 'Password@123', 'Logistics@123', 'Fleet@123', 'Finance@123', 'Driver@123', 'Warehouse@123', 'admin123', 'password'];
+    $openAccounts = 0;
+    $forced = 0;
+
+    foreach ($pdo->query('SELECT password_hash, must_change_password FROM users WHERE deleted_at IS NULL') as $user) {
+        foreach ($seeded as $guess) {
+            if (password_verify($guess, (string) $user['password_hash'])) {
+                $openAccounts++;
+                $forced += (int) $user['must_change_password'] === 1 ? 1 : 0;
+                break;
+            }
+        }
+    }
+
+    if ($openAccounts === 0) {
+        echo $ok('no account is on a password that ships with the code') . "
+";
+    } elseif ($openAccounts === $forced) {
+        echo $ok(sprintf('%d account(s) still on a seeded password, all required to change at next sign-in', $openAccounts)) . "
+";
+    } else {
+        echo $bad(sprintf('%d account(s) can sign in with a password published in this repository', $openAccounts - $forced)) . "
+";
+        $problems[] = 'Run: php scripts/secure.php --apply';
+    }
+} catch (Throwable $exception) {
+    $notes[] = 'The accounts could not be checked: ' . $exception->getMessage();
+}
+
 // ------------------------------------------------------------ verdict
 echo "\n" . str_repeat('-', 64) . "\n";
 

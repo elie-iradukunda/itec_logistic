@@ -13,7 +13,7 @@
 
   <div class="row">
     <div class="col-xl-8">
-      <form method="post" action="<?= url('account') ?>" class="lms-form">
+      <form method="post" action="<?= url('account') ?>" class="lms-form" enctype="multipart/form-data">
         <?= csrf_field() ?>
         <section class="card shadow-sm lms-section">
           <header class="lms-section-head">
@@ -21,6 +21,36 @@
             <div><h3><i class="fe fe-user fe-16 mr-2"></i>Your details</h3><p>These appear on records you create and on the audit trail.</p></div>
           </header>
           <div class="card-body">
+            <?php
+            // The photograph, beside the name it belongs to. Everyone was shown
+            // the same stock face before this; an account with no photo of its
+            // own now shows its own initials rather than a stranger.
+            $photo = \Models\Avatar::url($user['avatar_path'] ?? null);
+            ?>
+            <div class="lms-photo-row">
+              <div class="lms-photo-current">
+                <?php if ($photo !== null): ?>
+                  <img src="<?= e($photo) ?>" alt="<?= e($user['full_name']) ?>" class="lms-photo-img" id="photoPreview">
+                <?php else: ?>
+                  <span class="lms-photo-img lms-initials lms-initials-lg" style="background: <?= e(\Models\Avatar::tint((string) $user['full_name'])) ?>" id="photoInitials"><?= e(\Models\Avatar::initials((string) $user['full_name'])) ?></span>
+                  <img src="" alt="" class="lms-photo-img d-none" id="photoPreview">
+                <?php endif; ?>
+              </div>
+              <div class="lms-photo-actions">
+                <label class="btn btn-sm btn-outline-primary mb-1" for="avatar">
+                  <i class="fe fe-camera fe-14 mr-1"></i><?= $photo === null ? 'Add a photo' : 'Change photo' ?>
+                </label>
+                <input type="file" id="avatar" name="avatar" accept="image/png,image/jpeg,image/webp,image/gif" class="d-none">
+                <?php if ($photo !== null): ?>
+                  <button type="submit" name="remove_photo" value="1" class="btn btn-sm btn-link text-danger mb-1 px-2">Remove</button>
+                <?php endif; ?>
+                <small class="form-text text-muted mb-0">
+                  PNG, JPG, WEBP or GIF, up to 2 MB. Only people signed in to this system can see it.
+                </small>
+                <small class="form-text text-muted mb-0" id="photoChosen"></small>
+              </div>
+            </div>
+
             <div class="row">
               <div class="col-md-6 form-group lms-field is-required">
                 <label for="full_name">Full name <span class="lms-required">*</span></label>

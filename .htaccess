@@ -3,3 +3,26 @@ RewriteEngine On
 # Serve everything from /public so URLs look like /itec_logistic/trips
 RewriteRule ^$ public/ [L]
 RewriteRule ^(.*)$ public/$1 [L]
+
+# The .env file holds the database password and the mail API key. It must never
+# be served, whatever the layout.
+<Files ".env">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</Files>
+
+# Neither must anything that is plainly not a page.
+<FilesMatch "\.(md|sql|json|lock|example|log)$">
+    <IfModule mod_authz_core.c>
+        Require all denied
+    </IfModule>
+    <IfModule !mod_authz_core.c>
+        Order allow,deny
+        Deny from all
+    </IfModule>
+</FilesMatch>

@@ -114,7 +114,19 @@ $searchIndex[] = ['label' => 'My profile', 'url' => url('account'), 'group' => '
       <?php endif; ?>
       <li class="nav-item"><a class="nav-link logistics-top-control logistics-theme-icon" href="#" id="modeSwitcher" data-mode="dark" aria-label="Switch light or dark theme" title="Switch theme"><i class="fe fe-sun fe-16"></i></a></li>
       <li class="nav-item dropdown">
-        <a class="nav-link dropdown-toggle text-muted pr-0" href="#" data-toggle="dropdown"><span class="avatar avatar-sm mt-2"><img src="<?= $baseUrl ?>/assets/avatars/face-1.jpg" alt="User" class="avatar-img rounded-circle"></span></a>
+        <?php
+        // Everyone used to be shown the same stock photograph of a stranger.
+        // Now it is their own photo, or their own initials when they have not
+        // added one — which at least belongs to them.
+        $myPhoto = \Models\Avatar::url($_SESSION['logistics_user_avatar'] ?? null);
+        ?>
+        <a class="nav-link dropdown-toggle text-muted pr-0" href="#" data-toggle="dropdown">
+          <?php if ($myPhoto !== null): ?>
+            <span class="avatar avatar-sm mt-2"><img src="<?= e($myPhoto) ?>" alt="<?= e(current_user_name()) ?>" class="avatar-img rounded-circle"></span>
+          <?php else: ?>
+            <span class="avatar avatar-sm mt-2 lms-initials" style="background: <?= e(\Models\Avatar::tint(current_user_name())) ?>" title="<?= e(current_user_name()) ?>"><?= e(\Models\Avatar::initials(current_user_name())) ?></span>
+          <?php endif; ?>
+        </a>
         <div class="dropdown-menu dropdown-menu-right">
           <h6 class="dropdown-header"><?= e(current_user_name()) ?><small class="d-block text-muted"><?= e(current_user_email()) ?></small></h6>
           <a class="dropdown-item" href="<?= url('account') ?>"><i class="fe fe-user fe-16 mr-2"></i> My profile</a>

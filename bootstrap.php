@@ -18,6 +18,11 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
+// From here on an uncaught error produces a plain page rather than printing the
+// file paths, the database user and the stack trace at whoever is looking. The
+// console is left alone: a script wants its error in full.
+\Core\ErrorHandler::register();
+
 /** Display names for the roles. What each role may *do* now lives in `role_permissions`. */
 $roleDefinitions = [
     'super_admin' => ['label' => 'Super Admin'],
@@ -332,7 +337,7 @@ function navigation(): array
             ['vehicles', 'Vehicles'], ['drivers', 'Drivers'], ['maintenance', 'Maintenance'], ['vehicle_documents', 'Vehicle documents'],
         ]],
         ['label' => 'Transport', 'icon' => 'map-pin', 'id' => 'transportMenu', 'items' => [
-            ['requests', 'Transport requests'], ['trips', 'Trips'], ['shipments', 'Shipments'], ['deliveries', 'Deliveries'],
+            ['requests', 'Transport requests'], ['trips', 'Trips'], ['shipments', 'Shipments'], ['deliveries', 'Deliveries'], ['crossings', 'Border crossings'], ['border_posts', 'Border posts'],
         ]],
         ['label' => 'Commercial', 'icon' => 'briefcase', 'id' => 'commercialMenu', 'items' => [
             ['customers', 'Customers'], ['rates', 'Rate cards'], ['invoices', 'Invoices'], ['payments', 'Payments received'],
@@ -344,7 +349,7 @@ function navigation(): array
             ['warehouses', 'Warehouses'], ['warehouse', 'Inventory'], ['movements', 'Stock movements'], ['procurement', 'Procurement'], ['suppliers', 'Suppliers'],
         ]],
         ['label' => 'Accounting', 'icon' => 'book', 'id' => 'accountingMenu', 'items' => [
-            ['books', 'Accounting books'], ['journal', 'Journal'], ['accounts', 'Chart of accounts'], ['payment_methods', 'Payment methods'],
+            ['books', 'Accounting books'], ['journal', 'Journal'], ['accounts', 'Chart of accounts'], ['cheques', 'Cheques'], ['cheque_books', 'Cheque books'], ['budgets', 'Budget'], ['currencies', 'Currencies'], ['currency_rates', 'Exchange rates'], ['payment_methods', 'Payment methods'],
         ]],
     ];
 

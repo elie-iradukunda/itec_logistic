@@ -4,10 +4,13 @@ $doc = $book['doc'];
 $spec = \Models\Books::CATALOGUE[$book['key']];
 $ranged = (bool) $spec['ranged'];
 $needsAccount = in_array($book['key'], ['account_statement', 'general_ledger'], true);
-$exportQuery = ['from' => $book['from'], 'to' => $book['to']];
+$exportQuery = ['from' => $book['from'], 'to' => $book['to'], 'currency' => $book['currency']];
 if ($book['account_id'] !== null) {
     $exportQuery['account_id'] = $book['account_id'];
 }
+// Nothing is converted, so each currency is its own set of books. The selector
+// only appears once there is a second one to choose.
+$currencies = $book['currencies'];
 ?>
 <div class="container-fluid lms-list-page lms-book-page">
 
@@ -52,6 +55,19 @@ if ($book['account_id'] !== null) {
           <input type="date" id="to" name="to" class="form-control" value="<?= e($book['to']) ?>">
         </div>
 
+        <?php if (count($currencies) > 1): ?>
+          <div class="form-group mb-0 mr-2">
+            <label class="small text-muted mb-1 d-block" for="currency">Currency</label>
+            <select id="currency" name="currency" class="form-control">
+              <?php foreach ($currencies as $code): ?>
+                <option value="<?= e($code) ?>" <?= $book['currency'] === $code ? 'selected' : '' ?>><?= e($code) ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+        <?php else: ?>
+          <input type="hidden" name="currency" value="<?= e($book['currency']) ?>">
+        <?php endif; ?>
+
         <?php if ($needsAccount): ?>
           <div class="form-group mb-0 mr-2">
             <label class="small text-muted mb-1 d-block" for="account_id">Account</label>
@@ -81,13 +97,14 @@ if ($book['account_id'] !== null) {
               ['This quarter', date('Y-m-01', (int) strtotime('-' . (((int) date('n') - 1) % 3) . ' months')), date('Y-m-d')],
               ['This year', date('Y-01-01'), date('Y-m-d')],
           ] as [$label, $f, $t]): ?>
-            <a class="btn btn-link btn-sm align-self-end" href="<?= url(['books', 'view', $book['key']], ['from' => $f, 'to' => $t] + ($book['account_id'] !== null ? ['account_id' => $book['account_id']] : [])) ?>"><?= e($label) ?></a>
+            <a class="btn btn-link btn-sm align-self-end" href="<?= url(['books', 'view', $book['key']], ['from' => $f, 'to' => $t, 'currency' => $book['currency']] + ($book['account_id'] !== null ? ['account_id' => $book['account_id']] : [])) ?>"><?= e($label) ?></a>
           <?php endforeach; ?>
         <?php endif; ?>
       </form>
 
       <div class="lms-book-head">
         <h3><?= e($doc['company']) ?></h3>
+        <?php if (($doc['company_details'] ?? '') !== ''): ?><p class="lms-book-company"><?= e($doc['company_details']) ?></p><?php endif; ?>
         <h4><?= e($doc['title']) ?></h4>
         <?php if (($doc['period'] ?? '') !== ''): ?><p><?= e($doc['period']) ?></p><?php endif; ?>
         <?php if (($doc['basis'] ?? '') !== ''): ?><small><?= e($doc['basis']) ?></small><?php endif; ?>

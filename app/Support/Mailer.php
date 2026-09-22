@@ -271,8 +271,8 @@ final class Mailer
                 'Authorization: Bearer ' . \config('mail.api_key', ''),
                 'Content-Type: application/json',
             ],
-            CURLOPT_TIMEOUT => 15,
-            CURLOPT_CONNECTTIMEOUT => 8,
+            CURLOPT_TIMEOUT => 45,
+            CURLOPT_CONNECTTIMEOUT => 20,
         ]);
 
         $body = curl_exec($handle);
@@ -306,8 +306,7 @@ final class Mailer
         // Items, lines, products: things with a quantity and a price belong in a
         // table with headings, not in a run of sentences. A supplier reading an
         // order, or a customer checking an invoice, is comparing columns.
-        if (!empty($message['items']['rows'])) {
-            $items = $message['items'];
+        foreach (self::itemBlocks($message) as $items) {
             $columns = $items['columns'] ?? [];
             $align = static fn (string $key): string => in_array($key, $items['numeric'] ?? [], true) ? 'right' : 'left';
 
@@ -377,7 +376,8 @@ final class Mailer
             }
         }
 
-        $signature = $escape(self::signature());
+        // A message that asks for a reply cannot be signed "do not reply".
+        $signature = $escape($message['signature'] ?? self::signature());
         $redirectNote = $redirected
             ? '<p style="margin:14px 0 0;padding:10px 12px;background:#fff8e6;border-left:3px solid #e0a800;font-size:12px;color:#6b5600">'
               . 'Test mode: this message was addressed to <strong>' . $escape($realRecipient)
@@ -417,8 +417,7 @@ final class Mailer
             $parts[] = '';
         }
 
-        if (!empty($message['items']['rows'])) {
-            $items = $message['items'];
+        foreach (self::itemBlocks($message) as $items) {
             $parts[] = strtoupper((string) ($items['title'] ?? 'Items'));
             foreach ($items['rows'] as $row) {
                 $cells = [];
@@ -453,7 +452,7 @@ final class Mailer
         }
 
         $parts[] = '';
-        $parts[] = self::signature();
+        $parts[] = $message['signature'] ?? self::signature();
         $parts[] = 'Powered by ' . \vendor_name() . ' (c) ' . date('Y');
 
         return implode("\n", $parts);
@@ -488,6 +487,30 @@ final class Mailer
         }
     }
 
+    /**
+     * The tables a message carries.
+     *
+     * One block is the common case and is what every caller wrote first; a list
+     * of blocks is for a message that is genuinely several tables, such as a
+     * driver's trip sheet. Blocks with no rows are dropped so an empty table
+     * never reaches the page.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function itemBlocks(array $message): array
+    {
+        $items = $message['items'] ?? null;
+        if (!is_array($items) || $items === []) {
+            return [];
+        }
+
+        $blocks = isset($items['rows']) || isset($items['columns']) ? [$items] : array_values($items);
+
+        return array_values(array_filter(
+            $blocks,
+            static fn (mixed $block): bool => is_array($block) && !empty($block['rows'])
+        ));
+    }
     private static function signature(): string
     {
         try {

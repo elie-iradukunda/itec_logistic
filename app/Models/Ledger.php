@@ -102,6 +102,53 @@ final class Ledger
      *
      * @return list<array<string, mixed>>
      */
+    /**
+     * Which currency's books are being read.
+     *
+     * A company working in three countries keeps three sets of books, one per
+     * currency, because nothing is converted: a shilling receipt is counted in
+     * shillings and balances against shillings. Every question asked of the
+     * ledger is therefore asked of one currency at a time, and this is what
+     * says which. Null means all of them, which only makes sense for counting
+     * entries, never for a balance.
+     */
+    private static ?string $scope = null;
+
+    /** Reads the books in one currency until it is set again. */
+    public static function inCurrency(?string $code): void
+    {
+        $code = strtoupper(trim((string) $code));
+        self::$scope = $code === '' || $code === 'ALL' ? null : $code;
+    }
+
+    public static function currentCurrency(): ?string
+    {
+        return self::$scope;
+    }
+
+    /**
+     * The condition that narrows a query to the currency in scope.
+     *
+     * Returned as literal SQL rather than a placeholder because these queries
+     * are assembled in a dozen places, several of which already bind their
+     * parameters positionally. The value never comes from a user: it is matched
+     * against the configured currencies before it reaches here.
+     */
+    /** The same condition, for the books that write their own SQL. */
+    public static function scopeFor(string $alias = 'e'): string
+    {
+        return self::scopeSql($alias);
+    }
+
+    private static function scopeSql(string $alias = 'e'): string
+    {
+        if (self::$scope === null) {
+            return '';
+        }
+
+        return sprintf(" AND %s.currency = '%s'", $alias, self::$scope);
+    }
+
     public static function balances(?string $from = null, ?string $to = null, bool $includeZero = false): array
     {
         $to ??= date('Y-m-d');
@@ -121,7 +168,7 @@ final class Ledger
                          ON e.id = l.entry_id
                         AND e.status = 'posted'
                         AND e.deleted_at IS NULL
-                        AND e.entry_date <= :t4
+                        AND e.entry_date <= :t4" . self::scopeSql() . "
                  WHERE a.deleted_at IS NULL AND a.is_active = 1
                  GROUP BY a.id
                  ORDER BY a.section_order, a.account_code";
@@ -158,7 +205,7 @@ final class Ledger
               WHERE e.status = 'posted' AND e.deleted_at IS NULL
                 AND a.deleted_at IS NULL
                 AND a.account_type IN ('income', 'cost_of_sales', 'expense')
-                AND e.entry_date BETWEEN ? AND ?"
+                AND e.entry_date BETWEEN ? AND ?" . self::scopeSql()
         );
         $statement->execute([$from, $to]);
 
@@ -263,7 +310,7 @@ final class Ledger
                INNER JOIN gl_journal_entries e ON e.id = l.entry_id
               WHERE l.account_id = ?
                 AND e.status = 'posted' AND e.deleted_at IS NULL
-                AND e.entry_date BETWEEN ? AND ?
+                AND e.entry_date BETWEEN ? AND ?" . self::scopeSql() . "
               ORDER BY e.entry_date, e.id, l.line_no"
         );
         $statement->execute([$accountId, $from, $to]);
@@ -279,7 +326,7 @@ final class Ledger
                INNER JOIN gl_journal_entries e ON e.id = l.entry_id
               WHERE l.account_id = ?
                 AND e.status = 'posted' AND e.deleted_at IS NULL
-                AND e.entry_date < ?"
+                AND e.entry_date < ?" . self::scopeSql() . ""
         );
         $statement->execute([$accountId, $before]);
 
@@ -339,8 +386,14 @@ final class Ledger
         ?string $sourceType = null,
         ?int $sourceId = null,
         ?string $sourceCode = null,
-        ?string $reference = null
+        ?string $reference = null,
+        ?string $currency = null
     ): int {
+        // Each currency is its own set of books. Shillings balance against
+        // shillings, francs against francs, and nothing is ever restated into
+        // something the receipt did not say.
+        $currency = strtoupper(trim((string) $currency)) ?: Currency::base();
+
         $date = date('Y-m-d', (int) strtotime($date));
 
         if (self::isPeriodClosed($date)) {
@@ -406,21 +459,21 @@ final class Ledger
             if ($existingId !== null) {
                 $update = $db->prepare(
                     "UPDATE gl_journal_entries
-                        SET entry_date = ?, memo = ?, reference = ?, source_code = ?,
+                        SET entry_date = ?, currency = ?, memo = ?, reference = ?, source_code = ?,
                             status = 'posted', deleted_at = NULL, posted_by = ?
                       WHERE id = ?"
                 );
-                $update->execute([$date, mb_substr($memo, 0, 255), $reference, $sourceCode, \current_user_id(), $existingId]);
+                $update->execute([$date, $currency, mb_substr($memo, 0, 255), $reference, $sourceCode, \current_user_id(), $existingId]);
                 $db->prepare('DELETE FROM gl_journal_lines WHERE entry_id = ?')->execute([$existingId]);
                 $entryId = $existingId;
             } else {
                 $insert = $db->prepare(
                     "INSERT INTO gl_journal_entries
-                        (entry_no, entry_date, memo, reference, source_type, source_id, source_code, status, posted_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, 'posted', ?)"
+                        (entry_no, entry_date, currency, memo, reference, source_type, source_id, source_code, status, posted_by)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'posted', ?)"
                 );
                 $insert->execute([
-                    self::nextEntryNo(), $date, mb_substr($memo, 0, 255), $reference,
+                    self::nextEntryNo(), $date, $currency, mb_substr($memo, 0, 255), $reference,
                     $sourceType, $sourceId, $sourceCode, \current_user_id(),
                 ]);
                 $entryId = (int) $db->lastInsertId();
@@ -504,11 +557,14 @@ final class Ledger
      */
     public static function isBalanced(): bool
     {
+        // Each currency balances on its own, so "are the books balanced" is
+        // asked of one at a time; asked of all of them it would add shillings
+        // to francs and always look wrong.
         $row = self::db()->query(
             "SELECT COALESCE(SUM(l.debit), 0) d, COALESCE(SUM(l.credit), 0) c
                FROM gl_journal_lines l
                INNER JOIN gl_journal_entries e ON e.id = l.entry_id
-              WHERE e.status = 'posted' AND e.deleted_at IS NULL"
+              WHERE e.status = 'posted' AND e.deleted_at IS NULL" . self::scopeSql()
         )->fetch();
 
         return abs((float) $row['d'] - (float) $row['c']) < 0.004;

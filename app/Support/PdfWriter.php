@@ -119,11 +119,22 @@ final class PdfWriter
             }
 
             $s .= self::centre($doc['company'], $pageHeight - $top - 12, $pageWidth, 11, true, $brand['pdf']);
-            $s .= self::centre($doc['title'], $pageHeight - $top - 27, $pageWidth, 13, true);
-            if (($doc['period'] ?? '') !== '') {
-                $s .= self::centre((string) $doc['period'], $pageHeight - $top - 40, $pageWidth, 9, false);
+
+            // The address, phone and TIN under the name. A statement that
+            // leaves the building has to say which company it belongs to, and
+            // a trading name on its own does not.
+            $details = (string) ($doc['company_details'] ?? '');
+            $shift = 0;
+            if ($details !== '') {
+                $s .= self::centre($details, $pageHeight - $top - 23, $pageWidth, 7.5, false, [0.42, 0.46, 0.5]);
+                $shift = 9;
             }
-            $s .= self::text($left, $pageHeight - $top - 53, $stamp, 7, false, 0.4);
+
+            $s .= self::centre($doc['title'], $pageHeight - $top - 27 - $shift, $pageWidth, 13, true);
+            if (($doc['period'] ?? '') !== '') {
+                $s .= self::centre((string) $doc['period'], $pageHeight - $top - 40 - $shift, $pageWidth, 9, false);
+            }
+            $s .= self::text($left, $pageHeight - $top - 53 - $shift, $stamp, 7, false, 0.4);
 
             $pageLabel = ($index + 1) . '/' . $pageCount;
             $s .= self::text(

@@ -57,6 +57,33 @@ final class Posting
     private const FUEL = '5000';
     private const OTHER_EXPENSE = '6900';
 
+    /**
+     * What a document is worth, in the money it was written in.
+     *
+     * A fuel receipt from Namanga reads KES 12,500 and is posted as KES 12,500.
+     * It is never restated into francs: each currency keeps its own books, so
+     * the shilling page adds shillings and the page balances on its own. A rate
+     * that moves next month cannot change what this receipt says.
+     */
+    private static function inBooks(array $document, string $column, ?float $fallback = null): float
+    {
+        return round($fallback ?? (float) ($document[$column] ?? 0), 2);
+    }
+
+    /**
+     * The currency an entry belongs in: the one on the document.
+     *
+     * Each currency is its own set of books, so a shilling receipt is posted in
+     * shillings and read on the shilling page. Rows written before currencies
+     * existed carry none, and those were all in the base currency.
+     */
+    private static function moneyOf(array $document): string
+    {
+        $code = strtoupper(trim((string) ($document['currency'] ?? '')));
+
+        return $code !== '' ? $code : Currency::base();
+    }
+
     private static function db(): PDO
     {
         return Database::connection();
@@ -113,7 +140,8 @@ final class Posting
             'invoice',
             $invoiceId,
             (string) $invoice['invoice_number'],
-            $invoice['trip_code'] ?? null
+            $invoice['trip_code'] ?? null,
+            self::moneyOf($invoice)
         );
     }
 
@@ -134,7 +162,7 @@ final class Posting
             return null;
         }
 
-        $amount = round((float) $payment['amount'], 2);
+        $amount = self::inBooks($payment, 'amount');
         if ($amount <= 0) {
             return null;
         }
@@ -152,7 +180,8 @@ final class Posting
             'payment',
             $paymentId,
             (string) $payment['payment_code'],
-            (string) $payment['invoice_number']
+            (string) $payment['invoice_number'],
+            self::moneyOf($payment)
         );
     }
 
@@ -173,7 +202,7 @@ final class Posting
             return null;
         }
 
-        $amount = round((float) $expense['amount'], 2);
+        $amount = self::inBooks($expense, 'amount');
         if ($amount <= 0) {
             return null;
         }
@@ -192,7 +221,8 @@ final class Posting
             'expense',
             $expenseId,
             (string) $expense['reference_code'],
-            $expense['trip_code'] ?? null
+            $expense['trip_code'] ?? null,
+            self::moneyOf($expense)
         );
     }
 
@@ -213,7 +243,7 @@ final class Posting
             return null;
         }
 
-        $amount = round((float) $fuel['litres'] * (float) $fuel['unit_price'], 2);
+        $amount = self::inBooks($fuel, '', round((float) $fuel['litres'] * (float) $fuel['unit_price'], 2));
         if ($amount <= 0) {
             return null;
         }
@@ -235,7 +265,8 @@ final class Posting
             'fuel',
             $fuelId,
             (string) $fuel['reference_code'],
-            $fuel['trip_code'] ?? null
+            $fuel['trip_code'] ?? null,
+            self::moneyOf($fuel)
         );
     }
 
@@ -272,7 +303,8 @@ final class Posting
             'maintenance',
             $orderId,
             (string) $order['work_order_code'],
-            $order['plate_number'] ?? null
+            $order['plate_number'] ?? null,
+            self::moneyOf($order)
         );
     }
 
@@ -292,7 +324,7 @@ final class Posting
             return null;
         }
 
-        $amount = round((float) $request['amount'], 2);
+        $amount = self::inBooks($request, 'amount');
         if ($amount <= 0) {
             return null;
         }
@@ -309,7 +341,8 @@ final class Posting
             'purchase',
             $requestId,
             (string) $request['request_code'],
-            $supplier
+            $supplier,
+            self::moneyOf($request)
         );
     }
 

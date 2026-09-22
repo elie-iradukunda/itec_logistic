@@ -30,6 +30,9 @@ final class CsvWriter
         fwrite($out, "\xEF\xBB\xBF");
 
         fputcsv($out, [$doc['company']]);
+        if (($doc['company_details'] ?? '') !== '') {
+            fputcsv($out, [$doc['company_details']]);
+        }
         fputcsv($out, [$doc['title']]);
         if (($doc['period'] ?? '') !== '') {
             fputcsv($out, [$doc['period']]);

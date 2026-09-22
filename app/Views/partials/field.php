@@ -73,11 +73,21 @@ $closeGroup = static function (string $suffix): string {
     $emptyLabel = $field['type'] === 'relation'
         ? ($field['relation']['empty'] ?? 'None')
         : 'Select ' . strtolower($field['label']);
+    // A dependent relation carries the parent of each option with it, so the
+    // browser can narrow the list the moment the parent field is chosen.
+    $dependsOn = $field['type'] === 'relation' ? ($field['relation']['depends_on']['field'] ?? null) : null;
+    $parents = $dependsOn === null ? [] : \Models\LogisticsData::relationParents($field['relation']);
+    // What choosing this option answers on the rest of the form.
+    $fills = $field['type'] === 'relation' ? \Models\LogisticsData::relationFills($field['relation']) : [];
     ?>
-    <select class="form-control lms-select" id="<?= e($id) ?>" name="<?= e($inputName) ?>" <?= $required ? 'required' : '' ?>>
+    <select class="form-control lms-select" id="<?= e($id) ?>" name="<?= e($inputName) ?>" <?= $required ? 'required' : '' ?>
+      <?= $dependsOn === null ? '' : 'data-depends-on="f_' . e($dependsOn) . '"' ?>>
       <?php if ($emptyLabel !== null): ?><option value=""><?= e($required ? 'Select ' . strtolower($field['label']) : $emptyLabel) ?></option><?php endif; ?>
       <?php foreach ($options as $optionValue => $optionLabel): ?>
-        <option value="<?= e($optionValue) ?>" <?= (string) $value === (string) $optionValue ? 'selected' : '' ?>><?= e($optionLabel) ?></option>
+        <option value="<?= e($optionValue) ?>"
+          <?= $dependsOn === null ? '' : 'data-parent="' . e($parents[(int) $optionValue] ?? '') . '"' ?>
+          <?= isset($fills[(int) $optionValue]) ? 'data-fills="' . e((string) json_encode($fills[(int) $optionValue])) . '"' : '' ?>
+          <?= (string) $value === (string) $optionValue ? 'selected' : '' ?>><?= e($optionLabel) ?></option>
       <?php endforeach; ?>
     </select>
     <?php if ($options === []): ?><small class="form-text text-warning">No option exists yet. Create one first.</small><?php endif; ?>

@@ -77,6 +77,9 @@ final class HomeController
         $_SESSION['logistics_user_id'] = (int) $user['id'];
         $_SESSION['logistics_user_name'] = $user['full_name'];
         $_SESSION['logistics_user_email'] = $user['email'];
+        // The photo is on every page, so it is read once here rather than
+        // fetched again on each request.
+        $_SESSION['logistics_user_avatar'] = $user['avatar_path'] ?? null;
         $_SESSION['logistics_prvg'] = (int) $user['prvg'] === 1 ? 1 : 2;
         $_SESSION['logistics_must_change_password'] = (int) $user['must_change_password'] === 1;
         unset($_SESSION['logistics_driver_id']);

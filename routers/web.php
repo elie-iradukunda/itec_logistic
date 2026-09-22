@@ -37,6 +37,9 @@ $router->post('/notifications/read-all', [NotificationController::class, 'readAl
 // --------------------------------------------------- private file downloads
 $router->get('/files/{module}/{name}', [FileController::class, 'show'], ['permission' => 'dashboard']);
 
+// A profile photograph: anyone signed in may see a colleague's face.
+$router->get('/avatar/{name}', [FileController::class, 'avatar'], ['permission' => 'dashboard']);
+
 // ------------------------------------------------------------------ reports
 // Live reports first, so "/reports/view" is never read as a catalogue id.
 $router->get('/reports', [ReportController::class, 'index'], ['permission' => 'reports']);
@@ -84,11 +87,11 @@ $router->get('/audit/export', [AuditController::class, 'export'], ['permission' 
 // routes, and a permission check per ability.
 $modules = [
     'vehicles', 'drivers', 'vehicle_documents', 'maintenance',
-    'requests', 'trips', 'shipments', 'deliveries',
+    'requests', 'trips', 'shipments', 'deliveries', 'crossings', 'border_posts',
     'customers', 'rates', 'invoices', 'payments',
     'fuel', 'expenses',
     'warehouses', 'warehouse', 'movements', 'procurement', 'suppliers',
-    'users', 'accounts', 'payment_methods', 'lookups',
+    'users', 'accounts', 'payment_methods', 'cheques', 'cheque_books', 'budgets', 'currencies', 'lookups',
 ];
 
 foreach ($modules as $module) {

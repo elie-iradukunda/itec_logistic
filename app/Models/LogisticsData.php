@@ -265,6 +265,127 @@ final class LogisticsData
         return $options;
     }
 
+    /**
+     * Which parent each option of a dependent relation belongs to.
+     *
+     * The form uses it to hide the options that do not belong to the parent the
+     * user has picked, so the two drop-downs cannot disagree.
+     *
+     * @return array<int, string> option id => parent id, '' when it has none
+     */
+    public static function relationParents(array $relation): array
+    {
+        $column = $relation['depends_on']['column'] ?? null;
+        if ($column === null) {
+            return [];
+        }
+
+        $table = $relation['table'];
+        if (!self::relationParentAllowed($table, $column)) {
+            return [];
+        }
+
+        $sql = "SELECT id, {$column} AS parent FROM {$table}";
+        if (($relation['where'] ?? '') !== '') {
+            $sql .= " WHERE {$relation['where']}";
+        }
+
+        $parents = [];
+        foreach (self::db()->query($sql)->fetchAll() as $row) {
+            $parents[(int) $row['id']] = (string) ($row['parent'] ?? '');
+        }
+
+        return $parents;
+    }
+    /**
+     * What each option of a relation can fill in on the rest of the form.
+     *
+     * The consignee, their phone and the address were settled when the shipment
+     * was booked. Asking for them again on the delivery is not a safeguard, it
+     * is a second chance to get them wrong — so the answer travels with the
+     * option and the browser writes it in.
+     *
+     * @return array<int, array<string, string>> option id => target field => value
+     */
+    public static function relationFills(array $relation): array
+    {
+        $fills = $relation['fills'] ?? [];
+        if ($fills === []) {
+            return [];
+        }
+
+        $table = $relation['table'];
+        $columns = self::columnMeta($table);
+        $sources = array_values(array_filter($fills, static fn (string $column): bool => isset($columns[$column])));
+        if ($sources === []) {
+            return [];
+        }
+
+        $sql = 'SELECT id, ' . implode(', ', $sources) . " FROM {$table}";
+        if (($relation['where'] ?? '') !== '') {
+            $sql .= " WHERE {$relation['where']}";
+        }
+
+        $out = [];
+        foreach (self::db()->query($sql)->fetchAll() as $row) {
+            $values = [];
+            foreach ($fills as $target => $column) {
+                if (isset($columns[$column])) {
+                    $values[$target] = (string) ($row[$column] ?? '');
+                }
+            }
+            $out[(int) $row['id']] = $values;
+        }
+
+        return $out;
+    }
+    /**
+     * The loads a trip is carrying, with the consignee details they were booked
+     * with. A delivery form for a truck carrying one load has nothing to ask.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public static function shipmentsOnTrip(int $tripId): array
+    {
+        $statement = self::db()->prepare(
+            'SELECT id, shipment_code, consignee_name, consignee_phone, destination, destination_warehouse_id
+               FROM shipments
+              WHERE trip_id = ? AND deleted_at IS NULL
+              ORDER BY id'
+        );
+        $statement->execute([$tripId]);
+
+        return $statement->fetchAll();
+    }
+    /**
+     * How full a trip is.
+     *
+     * A truck shared between customers is only worth sharing if the person
+     * booking the next load can see what is left of it. Without this the
+     * question "will another five tonnes fit?" is answered by dispatching and
+     * being refused.
+     *
+     * @return array{weight: float, capacity: ?float, loads: int}
+     */
+    public static function tripLoad(int $tripId): array
+    {
+        $statement = self::db()->prepare(
+            'SELECT COALESCE(SUM(s.weight_kg), 0) AS weight, COUNT(s.id) AS loads, v.capacity_kg
+               FROM trips t
+               LEFT JOIN vehicles v ON v.id = t.vehicle_id
+               LEFT JOIN shipments s ON s.trip_id = t.id AND s.deleted_at IS NULL
+              WHERE t.id = ?
+              GROUP BY t.id, v.capacity_kg'
+        );
+        $statement->execute([$tripId]);
+        $row = $statement->fetch() ?: [];
+
+        return [
+            'weight' => (float) ($row['weight'] ?? 0),
+            'capacity' => isset($row['capacity_kg']) && $row['capacity_kg'] !== null ? (float) $row['capacity_kg'] : null,
+            'loads' => (int) ($row['loads'] ?? 0),
+        ];
+    }
     // --------------------------------------------------------------- writing
 
     /**
@@ -302,6 +423,11 @@ final class LogisticsData
                 case 'relation':
                     if (!self::relationExists($field['relation'], $value)) {
                         $errors[] = "{$label} points at a record that does not exist.";
+                        break;
+                    }
+                    $mismatch = self::dependencyError($field, $module, $input, $value);
+                    if ($mismatch !== null) {
+                        $errors[] = $mismatch;
                     }
                     break;
 
@@ -351,6 +477,44 @@ final class LogisticsData
         return array_values(array_unique($errors));
     }
 
+    /**
+     * A relation that hangs off another field has to agree with it.
+     *
+     * The form only offers the shipments on the chosen trip, but the offer is
+     * made in the browser and a post is not obliged to respect it. Filing a
+     * delivery against a load the truck is not carrying is exactly the kind of
+     * wrong record that is never noticed until someone chases the cargo.
+     */
+    private static function dependencyError(array $field, array $module, array $input, string $value): ?string
+    {
+        $depends = $field['relation']['depends_on'] ?? null;
+        if ($depends === null) {
+            return null;
+        }
+
+        $parent = trim((string) ($input[$depends['field']] ?? ''));
+        if ($parent === '') {
+            return null;
+        }
+
+        $table = $field['relation']['table'];
+        $column = $depends['column'];
+        if (!self::relationParentAllowed($table, $column)) {
+            return null;
+        }
+
+        $statement = self::db()->prepare("SELECT {$column} FROM {$table} WHERE id = ?");
+        $statement->execute([(int) $value]);
+        $owner = (string) ($statement->fetchColumn() ?: '');
+
+        if ($owner === $parent) {
+            return null;
+        }
+
+        $parentLabel = $module['fields'][$depends['field']]['label'] ?? 'the record above';
+
+        return "{$field['label']} does not belong to the {$parentLabel} you chose.";
+    }
     /**
      * Every uniqueness rule the table itself declares, checked before the insert
      * and reported against the field the person actually filled in.
@@ -598,6 +762,10 @@ final class LogisticsData
         $columns = self::derive($key, $columns, $id);
         $columns = self::respectNotNull($module['table'], $columns);
 
+        // The insert below fills $id in, so whether this was a creation has to
+        // be settled here — the audit line at the end runs long after.
+        $isNew = $id === null;
+
         $db = self::db();
         $owning = !$db->inTransaction();
         if ($owning) {
@@ -632,7 +800,7 @@ final class LogisticsData
         }
 
         $record = self::find($key, $id) ?? $columns;
-        AuditLog::record($id === null ? 'record.created' : 'record.updated', $key, self::code($key, $record));
+        AuditLog::record($isNew ? 'record.created' : 'record.updated', $key, self::code($key, $record));
 
         return $id;
     }
@@ -669,7 +837,7 @@ final class LogisticsData
     }
 
     /** @return array<string, array{nullable: bool, default: ?string}> */
-    private static function columnMeta(string $table): array
+    public static function columnMeta(string $table): array
     {
         if (isset(self::$columnMeta[$table])) {
             return self::$columnMeta[$table];
@@ -742,6 +910,18 @@ final class LogisticsData
             $columns['performed_by'] = \current_user_id();
         }
 
+        // A card written as "500 kg for 500,000" carries its own per-kilogram
+        // figure, so the list and any report read one number rather than having
+        // to know about the pair.
+        if ($key === 'rates') {
+            $unit = Rate::unitRate($columns);
+            if ($unit > 0 && in_array((string) ($columns['rate_type'] ?? ''), ['per_kg', 'per_m3', 'per_package'], true)) {
+                $columns['rate_amount'] = $unit;
+            }
+        }
+
+        $columns = self::convertMoney($key, $columns);
+
         if ($key === 'payment_methods') {
             // What payments store is the key, and a key that changes would
             // orphan every payment filed under it. It is made once, from the
@@ -797,6 +977,26 @@ final class LogisticsData
             $columns['must_change_password'] = 1;
             $columns['password_changed_at'] = null;
         }
+
+        return $columns;
+    }
+
+    /**
+     * Settles which money a record is in, and leaves the figure alone.
+     *
+     * An amount is stored exactly as it was agreed or paid. It is never
+     * converted, because each currency keeps its own books: a shilling receipt
+     * is read on the shilling page and adds up with other shillings. Converting
+     * would put a rate between the receipt and the report, and a rate that moves
+     * next month would change what last month said.
+     */
+    private static function convertMoney(string $key, array $columns): array
+    {
+        if (!array_key_exists('currency', $columns)) {
+            return $columns;
+        }
+
+        $columns['currency'] = strtoupper(trim((string) ($columns['currency'] ?? ''))) ?: Currency::base();
 
         return $columns;
     }
@@ -875,14 +1075,10 @@ final class LogisticsData
             $current = (int) ($columns['request_id'] ?? 0);
 
             if ($previous > 0 && $previous !== $current) {
-                $db->prepare("UPDATE transport_requests SET status = 'approved', trip_id = NULL WHERE id = ? AND trip_id = ?")
-                   ->execute([$previous, $id]);
+                self::releaseRequest($db, $previous);
             }
 
-            if ($current > 0) {
-                $db->prepare("UPDATE transport_requests SET status = 'assigned', trip_id = ? WHERE id = ? AND status IN ('approved', 'assigned')")
-                   ->execute([$id, $current]);
-            }
+            self::claimRequest($db, $current, $id);
 
             // Swapping the vehicle or the driver on a trip that is already out
             // has to hand the old one back. Otherwise the truck that returned to
@@ -905,6 +1101,34 @@ final class LogisticsData
             // A new item's opening stock becomes the first movement, so the
             // balance is always something the ledger can account for.
             StockLedger::openingBalance($id, (float) $columns['quantity'], isset($columns['unit_cost']) ? (float) $columns['unit_cost'] : null);
+        }
+
+        if ($key === 'cheques') {
+            // The written amount is whatever the lines add up to, so the figure
+            // on the leaf and the figure in the books can never disagree.
+            Cheque::recalculate($id);
+        }
+
+        if ($key === 'shipments') {
+            // Price it from the rate card as soon as the weight and the
+            // warehouses are known, and keep the figure: a rate renegotiated
+            // next month must not change what this customer was told today.
+            Rate::quoteShipment($id, $before);
+
+            // A request is answered the moment its cargo has a place on a truck,
+            // whether that truck was planned for it or was already going that
+            // way with four other customers aboard. The trip cannot record this
+            // — it has one request column and a shared truck has many — so the
+            // shipment does it.
+            // Booking a load names the depot it is standing in, so that depot
+            // starts showing it. Everything after this — loading, arriving,
+            // being collected — is recorded by the button that causes it.
+            CargoCustody::received($id);
+
+            self::claimRequest($db, (int) ($columns['request_id'] ?? 0), (int) ($columns['trip_id'] ?? 0));
+            if ((int) ($before['request_id'] ?? 0) > 0 && (int) ($before['request_id'] ?? 0) !== (int) ($columns['request_id'] ?? 0)) {
+                self::releaseRequest($db, (int) $before['request_id']);
+            }
         }
 
         if ($key === 'movements') {
@@ -936,6 +1160,47 @@ final class LogisticsData
         }
     }
 
+    /**
+     * The request is Assigned once its load is on a trip, and the trip is
+     * written back so the request page links to the truck that is carrying it.
+     * Booking a second customer onto the same trip assigns their request too;
+     * neither one takes the trip away from the other.
+     */
+    private static function claimRequest(\PDO $db, int $requestId, int $tripId): void
+    {
+        if ($requestId <= 0 || $tripId <= 0) {
+            return;
+        }
+
+        $db->prepare("UPDATE transport_requests SET status = 'assigned', trip_id = ? WHERE id = ? AND status IN ('approved', 'assigned')")
+           ->execute([$tripId, $requestId]);
+    }
+
+    /**
+     * Taking the load off the truck hands the request back — but only when
+     * nothing else is still carrying it, since one request can be split across
+     * two shipments.
+     */
+    private static function releaseRequest(\PDO $db, int $requestId): void
+    {
+        $held = $db->prepare('SELECT COUNT(*) FROM shipments WHERE request_id = ? AND trip_id IS NOT NULL AND deleted_at IS NULL');
+        $held->execute([$requestId]);
+
+        if ((int) $held->fetchColumn() > 0) {
+            return;
+        }
+
+        // A trip planned for this request on its own still holds it.
+        $planned = $db->prepare('SELECT COUNT(*) FROM trips WHERE request_id = ? AND deleted_at IS NULL');
+        $planned->execute([$requestId]);
+
+        if ((int) $planned->fetchColumn() > 0) {
+            return;
+        }
+
+        $db->prepare("UPDATE transport_requests SET status = 'approved', trip_id = NULL WHERE id = ? AND status = 'assigned'")
+           ->execute([$requestId]);
+    }
     /** Replaces the child rows of a record (stops, invoice lines, parts) in one go. */
     public static function saveLines(string $key, int $parentId, array $rows): void
     {
@@ -948,7 +1213,14 @@ final class LogisticsData
         $columns = $lines['columns'];
         $db = self::db();
 
-        $db->beginTransaction();
+        // Only open a transaction when nobody else already has one, the same way
+        // save() does. Without this, saving lines from inside a larger operation
+        // fails outright on "there is already an active transaction".
+        $owning = !$db->inTransaction();
+        if ($owning) {
+            $db->beginTransaction();
+        }
+
         try {
             $db->prepare("DELETE FROM {$lines['table']} WHERE {$lines['parent']} = ?")->execute([$parentId]);
 
@@ -992,9 +1264,11 @@ final class LogisticsData
                 self::applyLineTotal($module, $lines, $parentId);
             }
 
-            $db->commit();
+            if ($owning) {
+                $db->commit();
+            }
         } catch (\Throwable $exception) {
-            if ($db->inTransaction()) {
+            if ($owning && $db->inTransaction()) {
                 $db->rollBack();
             }
             throw $exception;
@@ -1004,13 +1278,28 @@ final class LogisticsData
             self::recalculateInvoice($parentId);
         }
 
+        if ($key === 'cheques') {
+            Cheque::recalculate($parentId);
+        }
+
+        if ($key === 'crossings') {
+            // Charges decide the total, its conversion, and what is posted, so a
+            // cleared crossing reposts as soon as they change.
+            BorderCrossing::recalculate($parentId);
+            BorderCrossing::post($parentId);
+        }
+
         AuditLog::record('record.lines_updated', $key, (string) $parentId, null, ['lines' => count($rows)]);
     }
 
     private static function applyLineTotal(array $module, array $lines, int $parentId): void
     {
+        // Most line tables carry a generated `line_total` (quantity x price). A
+        // cheque line is simply an amount, so the column to add up is named.
+        $column = $lines['line_amount'] ?? 'line_total';
+
         $total = (float) self::scalar(
-            "SELECT COALESCE(SUM(line_total), 0) FROM {$lines['table']} WHERE {$lines['parent']} = ?",
+            "SELECT COALESCE(SUM({$column}), 0) FROM {$lines['table']} WHERE {$lines['parent']} = ?",
             [$parentId]
         );
 
@@ -1273,27 +1562,39 @@ final class LogisticsData
         return $key . '/' . $filename;
     }
 
+    /** The one column of each table that may be shown as a label. */
+    private const LABEL_COLUMNS = [
+        'drivers' => 'full_name',
+        'vehicles' => 'plate_number',
+        'users' => 'full_name',
+        'roles' => 'role_name',
+        'trips' => 'reference_code',
+        'transport_requests' => 'reference_code',
+        'shipments' => 'shipment_code',
+        'customers' => 'customer_name',
+        'warehouses' => 'warehouse_name',
+        'suppliers' => 'supplier_name',
+        'inventory_items' => 'item_name',
+        'invoices' => 'invoice_number',
+        'gl_accounts' => 'account_name',
+    ];
+
     private static function relationAllowed(string $table, string $column): bool
     {
-        $allowed = [
-            'drivers' => ['full_name'],
-            'vehicles' => ['plate_number'],
-            'users' => ['full_name'],
-            'roles' => ['role_name'],
-            'trips' => ['reference_code'],
-            'transport_requests' => ['reference_code'],
-            'shipments' => ['shipment_code'],
-            'customers' => ['customer_name'],
-            'warehouses' => ['warehouse_name'],
-            'suppliers' => ['supplier_name'],
-            'inventory_items' => ['item_name'],
-            'invoices' => ['invoice_number'],
-            'gl_accounts' => ['account_name'],
-        ];
-
-        return in_array($column, $allowed[$table] ?? [], true);
+        return ($column !== '') && (self::LABEL_COLUMNS[$table] ?? null) === $column;
     }
 
+    /**
+     * Which column may be read as a dependent relation's parent.
+     *
+     * Never displayed, only compared — but it still reaches SQL by name, so it
+     * has to be a foreign key on a table the registry already knows about.
+     */
+    private static function relationParentAllowed(string $table, string $column): bool
+    {
+        return self::relationAllowed($table, self::LABEL_COLUMNS[$table] ?? '')
+            && preg_match('/^[a-z][a-z0-9_]*_id$/', $column) === 1;
+    }
     private static function relationExists(array $relation, string $id): bool
     {
         if (!self::relationAllowed($relation['table'], $relation['label'])) {

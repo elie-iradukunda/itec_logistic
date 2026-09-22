@@ -22,8 +22,9 @@ final class Workflow
     /** module => action => [from statuses, to status, verb used in the audit trail] */
     private const TRANSITIONS = [
         'requests' => [
-            'approve' => ['from' => ['pending'], 'to' => 'approved'],
-            'reject' => ['from' => ['pending', 'approved'], 'to' => 'rejected', 'needs_reason' => true],
+            'quote' => ['from' => ['pending'], 'to' => 'quoted'],
+            'approve' => ['from' => ['pending', 'quoted'], 'to' => 'approved'],
+            'reject' => ['from' => ['pending', 'quoted', 'approved'], 'to' => 'rejected', 'needs_reason' => true],
             // No "assign" transition: a request becomes assigned because a trip
             // was created for it, not because somebody pressed a button and then
             // walked away from the form.
@@ -34,8 +35,9 @@ final class Workflow
             'reject' => ['from' => ['requested', 'approved', 'loading'], 'to' => 'cancelled', 'needs_reason' => true],
         ],
         'deliveries' => [
-            'complete' => ['from' => ['loading', 'in_transit'], 'to' => 'delivered'],
-            'fail' => ['from' => ['loading', 'in_transit'], 'to' => 'failed', 'needs_reason' => true],
+            'drop' => ['from' => ['loading', 'in_transit'], 'to' => 'at_destination'],
+            'complete' => ['from' => ['loading', 'in_transit', 'at_destination'], 'to' => 'delivered'],
+            'fail' => ['from' => ['loading', 'in_transit', 'at_destination'], 'to' => 'failed', 'needs_reason' => true],
         ],
         'expenses' => [
             'approve' => ['from' => ['pending'], 'to' => 'approved'],
@@ -54,6 +56,18 @@ final class Workflow
             'approve' => ['from' => ['draft'], 'to' => 'issued'],
             'reject' => ['from' => ['draft', 'issued'], 'to' => 'cancelled', 'needs_reason' => true],
         ],
+        'crossings' => [
+            'arrive' => ['from' => ['expected'], 'to' => 'at_border'],
+            'lodge' => ['from' => ['at_border', 'held'], 'to' => 'lodged'],
+            'hold' => ['from' => ['at_border', 'lodged'], 'to' => 'held', 'needs_reason' => true],
+            'clear' => ['from' => ['lodged', 'held'], 'to' => 'cleared'],
+            'depart' => ['from' => ['cleared'], 'to' => 'departed'],
+        ],
+        'cheques' => [
+            'issue' => ['from' => ['draft'], 'to' => 'issued'],
+            'present' => ['from' => ['issued'], 'to' => 'presented'],
+            'void' => ['from' => ['draft', 'issued'], 'to' => 'void', 'needs_reason' => true],
+        ],
     ];
 
     private const STATUS_COLUMN = [
@@ -64,6 +78,8 @@ final class Workflow
         'procurement' => ['purchase_requests', 'status'],
         'maintenance' => ['maintenance_orders', 'status'],
         'invoices' => ['invoices', 'status'],
+        'cheques' => ['gl_cheques', 'status'],
+        'crossings' => ['border_crossings', 'status'],
     ];
 
     /** Actions available for a record right now, given its status. */
@@ -120,16 +136,26 @@ final class Workflow
         }
 
         $db = Database::connection();
-        $db->beginTransaction();
+
+        // Only open a transaction when nobody else already has one: an action
+        // applied from inside a larger operation must join it, not fail on
+        // "there is already an active transaction".
+        $owning = !$db->inTransaction();
+        if ($owning) {
+            $db->beginTransaction();
+        }
+
         try {
             $update = $db->prepare("UPDATE {$table} SET {$statusColumn} = ? WHERE id = ?");
             $update->execute([$rule['to'], $id]);
 
             $message = self::effects($module, $action, $rule['to'], $record, $reason);
 
-            $db->commit();
+            if ($owning) {
+                $db->commit();
+            }
         } catch (\Throwable $exception) {
-            if ($db->inTransaction()) {
+            if ($owning && $db->inTransaction()) {
                 $db->rollBack();
             }
 
@@ -166,6 +192,14 @@ final class Workflow
 
         if ($module === 'invoices' && $action === 'approve' && (float) $record['total_amount'] <= 0) {
             return 'Add at least one invoice line before issuing this invoice.';
+        }
+
+        if ($module === 'cheques') {
+            return Cheque::guard($action, $record);
+        }
+
+        if ($module === 'crossings') {
+            return BorderCrossing::guard($action, $record);
         }
 
         return null;
@@ -228,6 +262,14 @@ final class Workflow
             return sprintf('%s has no cooling unit and this trip carries cold-chain cargo.', $vehicle['plate_number']);
         }
 
+        // Goods of ours going out on this truck have to actually be in the shed
+        // they are leaving. Finding out afterwards means the balance has already
+        // gone negative or the load has already gone without them.
+        $shortage = StockIssue::guardTrip((int) $trip['id']);
+        if ($shortage !== null) {
+            return $shortage;
+        }
+
         $capacity = $vehicle['capacity_kg'] !== null ? (float) $vehicle['capacity_kg'] : null;
         if ($capacity !== null && $capacity > 0 && (float) $totals['weight'] > $capacity) {
             return sprintf(
@@ -252,12 +294,17 @@ final class Workflow
         $code = (string) ($record[self::codeColumn($module)] ?? $id);
 
         return match (true) {
+            $module === 'requests' && $action === 'quote' => self::quoteRequest($id, $code),
             $module === 'requests' && $action === 'approve' => self::approveRequest($db, $id, $code, $actor),
             $module === 'requests' && $action === 'reject' => self::rejectRequest($db, $id, $code, $actor, $reason),
             $module === 'trips' && $action === 'dispatch' => self::dispatchTrip($db, $record, $code),
             $module === 'trips' && $action === 'complete' => self::completeTrip($db, $record, $code),
             $module === 'trips' && $action === 'reject' => self::cancelTrip($db, $record, $code, $reason),
 
+            $module === 'cheques' => Cheque::applied($action, $record, $reason, $actor),
+            $module === 'crossings' => BorderCrossing::applied($action, $record, $reason, $actor),
+
+            $module === 'deliveries' && $action === 'drop' => self::dropDelivery($db, $record, $code),
             $module === 'deliveries' && $action === 'complete' => self::completeDelivery($db, $record, $code, $actor),
             $module === 'deliveries' && $action === 'fail' => self::failDelivery($db, $record, $code, $reason),
 
@@ -280,10 +327,27 @@ final class Workflow
 
     private static function approveRequest(PDO $db, int $id, string $code, ?int $actor): string
     {
-        $stamp = $db->prepare('UPDATE transport_requests SET approved_by = ?, approved_at = NOW(), rejection_reason = NULL WHERE id = ?');
-        $stamp->execute([$actor, $id]);
+        // "Approved" on a quoted request means the customer accepted the price,
+        // so the moment is stamped. Leaving it blank would let a request read
+        // Approved with nothing recorded about who agreed to what.
+        $db->prepare(
+            'UPDATE transport_requests
+                SET approved_by = ?, approved_at = NOW(), rejection_reason = NULL,
+                    accepted_at = COALESCE(accepted_at, NOW())
+              WHERE id = ?'
+        )->execute([$actor, $id]);
 
         Notifier::toRole('logistics_manager', 'Transport request approved', sprintf('%s is approved and ready to be planned into a trip.', $code), 'requests', 'success', 'requests', $code);
+
+        // The person who asked is almost always the person who accepts, so the
+        // name is carried across rather than typed again. It stays editable for
+        // the case where somebody senior signed it off instead.
+        $db->prepare(
+            'UPDATE transport_requests r
+               LEFT JOIN customers c ON c.id = r.customer_id
+                SET r.accepted_by = COALESCE(NULLIF(r.accepted_by, ""), NULLIF(r.requested_by_contact, ""), NULLIF(c.contact_name, ""))
+              WHERE r.id = ?'
+        )->execute([$id]);
 
         return sprintf('Request %s approved. Plan a trip for it next.', $code);
     }
@@ -326,7 +390,34 @@ final class Workflow
             $code
         );
 
-        return sprintf('%s dispatched. The vehicle and driver are now marked on trip.', $code);
+        // Goods of ours on board leave the company's stock, through the ordinary
+        // ledger, with this trip as the document behind the issue.
+        $issued = StockIssue::issueTrip($id, $code);
+
+        // Physically, the shed is now emptier. Each load leaves the depot it was
+        // standing in, with this trip named as the reason, so a depot manager can
+        // answer "where did yesterday's pallets go" without asking anybody.
+        CargoCustody::loaded($id);
+
+        // The sheet the driver works from on the road: the loads behind him, who
+        // signs for each one, and the route. A notification he can only read at
+        // a screen is no use once the truck has left.
+        $sheet = DriverMail::tripSheet($id);
+
+        // The people waiting for the goods hear it too, not just the driver.
+        $told = CustomerMail::dispatched($id);
+
+        return sprintf(
+            '%s dispatched. The vehicle and driver are now marked on trip.%s%s%s',
+            $code,
+            $issued > 0
+                ? sprintf(' %d stock line(s) were issued out of the depot.', $issued)
+                : '',
+            $sheet
+                ? ' The trip sheet was emailed to the driver.'
+                : ' No trip sheet was sent: this driver has no email address on file.',
+            $told > 0 ? sprintf(' %d customer(s) were told their goods are on the way.', $told) : ''
+        );
     }
 
     private static function completeTrip(PDO $db, array $trip, string $code): string
@@ -367,6 +458,96 @@ final class Workflow
         return sprintf('%s cancelled and its vehicle and driver released.', $code);
     }
 
+    /**
+     * The load has reached its own warehouse, and the truck drives on.
+     *
+     * A trip running Kigali to Rusumo may drop part of its load at Kayonza. That
+     * shipment has arrived: it is off the truck, it is at the warehouse it was
+     * sold to, and the only thing left is for the customer to come and collect
+     * it. The trip carries on with what is still on board.
+     *
+     * Calling that "delivered" would be a lie to the customer who has not got it
+     * yet, and calling it "in transit" would be a lie to the driver who no
+     * longer has it. Hence a state of its own.
+     */
+    /**
+     * Work out the price and send it to the customer.
+     *
+     * A quote that stays inside the office is not a quote. This puts a figure on
+     * the request, explains how it was reached, and emails it to the person who
+     * asked — which is the whole transaction up to the point of agreement.
+     */
+    private static function quoteRequest(int $id, string $code): string
+    {
+        $quote = Rate::quoteRequest($id);
+
+        if ($quote === null) {
+            return sprintf(
+                'There is no rate card covering that route yet, so %s could not be priced. Add a rate card for those two warehouses and quote it again.',
+                $code
+            );
+        }
+
+        Database::connection()->prepare('UPDATE transport_requests SET quoted_at = COALESCE(quoted_at, NOW()) WHERE id = ?')->execute([$id]);
+
+        CustomerMail::quote($id);
+
+        return sprintf('Quoted %s — %s.%s', Settings::money($quote['amount']), $quote['basis'], CustomerMail::outcome());
+    }
+
+    private static function dropDelivery(PDO $db, array $delivery, string $code): string
+    {
+        $id = (int) $delivery['id'];
+        $db->prepare('UPDATE deliveries SET dropped_at = COALESCE(dropped_at, NOW()) WHERE id = ?')->execute([$id]);
+
+        if (!empty($delivery['shipment_id'])) {
+            $db->prepare("UPDATE shipments SET status = 'delivered' WHERE id = ?")->execute([(int) $delivery['shipment_id']]);
+        }
+
+        $where = self::warehouseName($db, $delivery['destination_warehouse_id'] ?? null) ?? (string) $delivery['destination'];
+
+        // It is in somebody's shed now, and that shed has to show it.
+        if (!empty($delivery['shipment_id'])) {
+            CargoCustody::arrived(
+                (int) $delivery['shipment_id'],
+                !empty($delivery['destination_warehouse_id']) ? (int) $delivery['destination_warehouse_id'] : null,
+                $id
+            );
+        }
+
+        Notifier::toRole(
+            'logistics_manager',
+            'Load at its destination warehouse',
+            sprintf('%s is off the truck at %s and is waiting to be collected by %s.', $code, $where, $delivery['recipient_name']),
+            'deliveries',
+            'info',
+            'deliveries',
+            $code
+        );
+
+        CustomerMail::arrived($id);
+
+        return sprintf(
+            '%s is at %s and waiting to be collected. The trip carries on with whatever is still on board.%s',
+            $code,
+            $where,
+            CustomerMail::outcome()
+        );
+    }
+
+    private static function warehouseName(PDO $db, mixed $warehouseId): ?string
+    {
+        if (empty($warehouseId)) {
+            return null;
+        }
+
+        $statement = $db->prepare('SELECT warehouse_name FROM warehouses WHERE id = ?');
+        $statement->execute([(int) $warehouseId]);
+        $name = $statement->fetchColumn();
+
+        return $name === false ? null : (string) $name;
+    }
+
     private static function completeDelivery(PDO $db, array $delivery, string $code, ?int $actor): string
     {
         $id = (int) $delivery['id'];
@@ -378,13 +559,29 @@ final class Workflow
             $db->prepare("UPDATE shipments SET status = 'delivered' WHERE id = ?")->execute([(int) $delivery['shipment_id']]);
         }
 
+        // Handed over, so it is out of the depot as well as off the books.
+        if (!empty($delivery['shipment_id'])) {
+            CargoCustody::collected(
+                (int) $delivery['shipment_id'],
+                !empty($delivery['destination_warehouse_id']) ? (int) $delivery['destination_warehouse_id'] : null,
+                $id
+            );
+        }
+
         $warning = empty($delivery['proof_file'])
             ? ' Proof of delivery is still missing; upload it on the delivery record.'
             : '';
 
         Notifier::toRole('logistics_manager', 'Delivery completed', sprintf('%s was delivered to %s.', $code, $delivery['recipient_name']), 'deliveries', 'success', 'deliveries', $code);
 
-        return sprintf('%s marked delivered.%s', $code, $warning);
+        CustomerMail::handedOver($id);
+
+        return sprintf(
+            '%s marked delivered.%s%s',
+            $code,
+            $warning,
+            CustomerMail::outcome()
+        );
     }
 
     private static function failDelivery(PDO $db, array $delivery, string $code, string $reason): string
@@ -482,13 +679,16 @@ final class Workflow
         );
         $lines->execute([(int) $request['id']]);
 
+        // Priced in the money the request was raised in, not the company's own.
+        $money = static fn (float $amount): string => Currency::format($amount, (string) ($request['currency'] ?? ''));
+
         $rows = [];
         foreach ($lines->fetchAll(PDO::FETCH_ASSOC) as $line) {
             $rows[] = [
                 'item_name' => (string) $line['item_name'],
                 'quantity' => rtrim(rtrim(number_format((float) $line['quantity'], 2, '.', ''), '0'), '.') . ' ' . ($line['unit_of_measure'] ?: 'unit'),
-                'unit_price' => Settings::money((float) $line['unit_price']),
-                'line_total' => Settings::money((float) $line['line_total']),
+                'unit_price' => $money((float) $line['unit_price']),
+                'line_total' => $money((float) $line['line_total']),
             ];
         }
 
@@ -498,7 +698,7 @@ final class Workflow
                 'item_name' => (string) $request['description'],
                 'quantity' => '—',
                 'unit_price' => '—',
-                'line_total' => Settings::money((float) $request['amount']),
+                'line_total' => $money((float) $request['amount']),
             ];
         }
 
@@ -530,7 +730,7 @@ final class Workflow
                 'columns' => ['item_name' => 'Item', 'quantity' => 'Quantity', 'unit_price' => 'Unit price', 'line_total' => 'Amount'],
                 'numeric' => ['quantity', 'unit_price', 'line_total'],
                 'rows' => $rows,
-                'totals' => ['Order value' => Settings::money((float) $request['amount'])],
+                'totals' => ['Order value' => $money((float) $request['amount'])],
             ],
             'facts' => [
                 'Order reference' => $code,
@@ -552,6 +752,105 @@ final class Workflow
             : sprintf(' The order to %s is in the outbox (%s).', $who['email'], $result['reason']);
     }
 
+    /**
+     * Confirms to the supplier that their delivery arrived.
+     *
+     * Until now the order went out and nothing came back, so a supplier had no
+     * written acknowledgement that the goods had been accepted — and the first
+     * anybody heard of a short delivery was when the invoice was queried. This
+     * is the note they invoice against, and the record that the count was done.
+     */
+    private static function emailGoodsReceived(PDO $db, array $request, string $code): string
+    {
+        if (empty($request['supplier_id'])) {
+            return '';
+        }
+
+        $supplier = $db->prepare('SELECT supplier_name, contact_name, email, payment_terms_days FROM suppliers WHERE id = ? AND deleted_at IS NULL');
+        $supplier->execute([(int) $request['supplier_id']]);
+        $who = $supplier->fetch();
+
+        if ($who === false || trim((string) $who['email']) === '') {
+            return ' No receipt note was sent: that supplier has no email address on file.';
+        }
+
+        $money = static fn (float $amount): string => Currency::format($amount, (string) ($request['currency'] ?? ''));
+
+        $lines = $db->prepare(
+            'SELECT item_name, quantity, unit_of_measure, unit_price, line_total
+               FROM purchase_request_lines WHERE purchase_request_id = ? ORDER BY id'
+        );
+        $lines->execute([(int) $request['id']]);
+
+        $rows = [];
+        foreach ($lines->fetchAll(PDO::FETCH_ASSOC) as $line) {
+            $rows[] = [
+                'item_name' => (string) $line['item_name'],
+                'quantity' => rtrim(rtrim(number_format((float) $line['quantity'], 2, '.', ''), '0'), '.') . ' ' . ($line['unit_of_measure'] ?: 'unit'),
+                'line_total' => $money((float) $line['line_total']),
+            ];
+        }
+
+        if ($rows === []) {
+            $rows[] = [
+                'item_name' => (string) $request['description'],
+                'quantity' => '—',
+                'line_total' => $money((float) $request['amount']),
+            ];
+        }
+
+        $where = '';
+        if (!empty($request['warehouse_id'])) {
+            $place = $db->prepare('SELECT warehouse_name, location FROM warehouses WHERE id = ?');
+            $place->execute([(int) $request['warehouse_id']]);
+            $row = $place->fetch();
+            $where = $row === false ? '' : trim($row['warehouse_name'] . ', ' . $row['location']);
+        }
+
+        $terms = (int) ($who['payment_terms_days'] ?? 30);
+
+        $result = \Support\Mailer::send([
+            'key' => 'goods-received-' . $request['id'],
+            'category' => 'invoice',
+            'to' => trim((string) $who['email']),
+            'to_name' => trim((string) ($who['contact_name'] ?: $who['supplier_name'])),
+            'subject' => sprintf('Goods received against order %s', $code),
+            'heading' => 'Goods received — ' . $code,
+            'lines' => [
+                sprintf('Dear %s,', $who['contact_name'] ?: $who['supplier_name']),
+                sprintf(
+                    'We confirm that the goods ordered under %s were delivered and checked in%s. The quantities received are set out below.',
+                    $code,
+                    $where !== '' ? ' at ' . $where : ''
+                ),
+            ],
+            'items' => [
+                'title' => 'Received',
+                'columns' => ['item_name' => 'Item', 'quantity' => 'Quantity received', 'line_total' => 'Value'],
+                'numeric' => ['quantity', 'line_total'],
+                'rows' => $rows,
+                'totals' => ['Total received' => $money((float) $request['amount'])],
+            ],
+            'facts' => [
+                'Order reference' => $code,
+                'Received on' => date('j F Y'),
+                'Received at' => $where !== '' ? $where : 'Our premises',
+                'Payment terms' => sprintf('%d days from delivery', $terms),
+                'Payment due by' => date('j F Y', strtotime('+' . $terms . ' days')),
+            ],
+            'closing' => [
+                sprintf('You may now invoice us for this delivery. Please quote %s on the invoice so that it is matched and paid without delay.', $code),
+                'If anything in the table above does not agree with your delivery note, reply to this message and we will check it against the goods before the invoice is processed.',
+                'Thank you for supplying us.',
+            ],
+            'entity_type' => 'procurement',
+            'entity_id' => $code,
+        ]);
+
+        return $result['sent']
+            ? sprintf(' A receipt note was emailed to %s.', $who['supplier_name'])
+            : sprintf(' The receipt note to %s is in the outbox (%s).', $who['email'], $result['reason']);
+    }
     private static function receivePurchase(PDO $db, array $request, string $code): string
     {
         $db->prepare('UPDATE purchase_requests SET received_at = NOW() WHERE id = ?')->execute([(int) $request['id']]);
@@ -561,9 +860,13 @@ final class Workflow
 
         Notifier::toRole('warehouse_manager', 'Goods received', sprintf('%s was received and %d stock line(s) were posted.', $code, $posted), 'warehouse', 'success', 'procurement', $code);
 
-        return $posted > 0
+        // The supplier is owed an answer: their delivery arrived, and this is
+        // what they invoice against.
+        $told = self::emailGoodsReceived($db, $request, $code);
+
+        return ($posted > 0
             ? sprintf('%s received. %d stock line(s) posted into inventory.', $code, $posted)
-            : sprintf('%s received. No line was linked to a stock item, so nothing was posted into inventory.', $code);
+            : sprintf('%s received. No line was linked to a stock item, so nothing was posted into inventory.', $code)) . $told;
     }
 
     private static function completeMaintenance(PDO $db, array $order, string $code, ?int $actor): string
@@ -745,7 +1048,7 @@ final class Workflow
 
     private static function record(string $table, int $id): ?array
     {
-        $allowed = ['transport_requests', 'trips', 'deliveries', 'expenses', 'purchase_requests', 'maintenance_orders', 'invoices', 'vehicles', 'drivers'];
+        $allowed = ['transport_requests', 'trips', 'deliveries', 'expenses', 'purchase_requests', 'maintenance_orders', 'invoices', 'vehicles', 'drivers', 'gl_cheques', 'border_crossings'];
         if (!in_array($table, $allowed, true)) {
             throw new \InvalidArgumentException('Unknown workflow table.');
         }

@@ -85,6 +85,18 @@ final class Lookup
             'targets' => [['users', 'department']],
             'defaults' => ['Operations', 'Fleet', 'Warehouse', 'Finance', 'Management', 'Administration'],
         ],
+        'border_charge' => [
+            'label' => 'Border charge types',
+            'description' => 'What a truck pays to get through a crossing: duty, the clearing agent, the weighbridge, an escort.',
+            'targets' => [['border_charges', 'charge_type']],
+            'defaults' => ['Customs duty', 'Import VAT', 'Withholding tax', 'Clearing agent fee', 'Transit bond', 'Weighbridge', 'Escort fee', 'Parking and storage', 'Road toll', 'Other border charge'],
+        ],
+        'border_document' => [
+            'label' => 'Border documents',
+            'description' => 'The papers a crossing can be held on. Which ones apply depends on the corridor and the cargo.',
+            'targets' => [['border_documents', 'document_type']],
+            'defaults' => ['Customs declaration', 'T1 transit bond', 'Commercial invoice', 'Packing list', 'Certificate of origin', 'Bill of lading', 'Weighbridge ticket', 'COMESA yellow card', 'Road transit permit', 'Phytosanitary certificate', 'Driver passport'],
+        ],
         'report_period' => [
             'label' => 'Report periods',
             'description' => 'How often a saved report covers its figures.',

@@ -92,6 +92,12 @@ final class Books
         [$from, $to] = self::period($query);
         $accountId = isset($query['account_id']) && $query['account_id'] !== '' ? (int) $query['account_id'] : null;
 
+        // A book is read in one currency. Nothing is converted, so shillings and
+        // francs are two sets of books that each balance on their own; asking
+        // for both at once would add them together and answer nothing.
+        $currency = self::currencyOf($query);
+        Ledger::inCurrency($currency);
+
         $result = match ($key) {
             'chart_of_accounts' => self::chartOfAccounts($to),
             'journal' => self::journal($from, $to),
@@ -103,6 +109,11 @@ final class Books
             'account_statement' => self::accountStatement($accountId, $from, $to),
         };
 
+        // A printed page has to say which money it counts, or a shilling trial
+        // balance and a franc one are indistinguishable once they leave the
+        // screen.
+        $result['doc']['period'] = trim($result['doc']['period'] . ' · ' . $currency, ' ·');
+
         return [
             'doc' => $result['doc'],
             'note' => $result['note'] ?? '',
@@ -111,7 +122,54 @@ final class Books
             'from' => $from,
             'to' => $to,
             'account_id' => $accountId,
+            'currency' => $currency,
+            'currencies' => self::currenciesInUse(),
         ];
+    }
+
+    /**
+     * Which currency this book is being read in.
+     *
+     * Only a currency the books actually contain is accepted: a code typed into
+     * the address bar cannot steer the query, and a company that has never
+     * recorded a shilling is never shown an empty shilling page.
+     */
+    private static function currencyOf(array $query): string
+    {
+        $wanted = strtoupper(trim((string) ($query['currency'] ?? '')));
+        $available = self::currenciesInUse();
+
+        if ($wanted !== '' && in_array($wanted, $available, true)) {
+            return $wanted;
+        }
+
+        $base = Currency::base();
+
+        return in_array($base, $available, true) ? $base : ($available[0] ?? $base);
+    }
+
+    /**
+     * The currencies the ledger has entries in, base first.
+     *
+     * @return list<string>
+     */
+    public static function currenciesInUse(): array
+    {
+        $rows = Database::connection()
+            ->query("SELECT DISTINCT currency FROM gl_journal_entries WHERE status = 'posted' AND deleted_at IS NULL ORDER BY currency")
+            ->fetchAll(PDO::FETCH_COLUMN);
+
+        $codes = array_values(array_filter(array_map('strval', $rows), static fn (string $c): bool => $c !== ''));
+        $base = Currency::base();
+
+        if ($codes === []) {
+            return [$base];
+        }
+
+        // The base currency reads first because it is the one most pages want.
+        usort($codes, static fn (string $a, string $b): int => ($a === $base ? -1 : 0) <=> ($b === $base ? -1 : 0) ?: strcmp($a, $b));
+
+        return $codes;
     }
 
     /** @return array{0: string, 1: string} */
@@ -199,7 +257,7 @@ final class Books
                INNER JOIN gl_journal_lines l ON l.entry_id = e.id
                INNER JOIN gl_accounts a ON a.id = l.account_id
               WHERE e.status = 'posted' AND e.deleted_at IS NULL
-                AND e.entry_date BETWEEN ? AND ?
+                AND e.entry_date BETWEEN ? AND ?" . Ledger::scopeFor('e') . "
               ORDER BY e.entry_date, e.id, l.line_no"
         );
         $statement->execute([$from, $to]);
@@ -553,7 +611,7 @@ final class Books
                INNER JOIN gl_journal_entries e ON e.id = l.entry_id
                INNER JOIN gl_accounts a ON a.id = l.account_id
               WHERE e.status = 'posted' AND e.deleted_at IS NULL
-                AND e.entry_date BETWEEN ? AND ?
+                AND e.entry_date BETWEEN ? AND ?" . Ledger::scopeFor('e') . "
                 AND a.is_bank = 0
                 AND e.id IN (
                     SELECT lx.entry_id FROM gl_journal_lines lx
@@ -628,7 +686,7 @@ final class Books
                INNER JOIN gl_accounts a ON a.id = l.account_id
               WHERE e.status = 'posted' AND e.deleted_at IS NULL
                 AND a.is_bank = 1
-                AND e.entry_date {$comparison} ?"
+                AND e.entry_date {$comparison} ?" . Ledger::scopeFor('e') . ""
         );
         $statement->execute([$date]);
 

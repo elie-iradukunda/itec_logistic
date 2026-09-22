@@ -14,6 +14,8 @@ final class Reference
 {
     private const ALLOWED = [
         'warehouses' => 'warehouse_code',
+        'gl_cheques' => 'reference',
+        'border_crossings' => 'reference',
         'vehicle_documents' => 'document_code',
         'maintenance_orders' => 'work_order_code',
         'transport_requests' => 'reference_code',
@@ -28,6 +30,7 @@ final class Reference
         'expenses' => 'reference_code',
         'inventory_items' => 'sku',
         'stock_movements' => 'movement_code',
+        'warehouse_cargo' => 'movement_code',
         'purchase_requests' => 'request_code',
         'suppliers' => 'supplier_code',
     ];

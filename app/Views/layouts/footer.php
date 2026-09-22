@@ -140,6 +140,81 @@ $(function () {
     }
   });
 
+  // A drop-down that hangs off another one only offers what belongs to the
+  // parent already chosen: the shipments on this trip, not every shipment in
+  // the company. Picking a different parent clears a choice that no longer fits.
+  function lmsNarrow($select) {
+    var all = $select.data('lmsOptions');
+    if (!all) {
+      all = $select.find('option').toArray();
+      $select.data('lmsOptions', all);
+    }
+
+    var parent = $('#' + $select.attr('data-depends-on')).val() || '';
+    var current = $select.val();
+    var keptCurrent = false;
+
+    $select.empty();
+    $.each(all, function (i, option) {
+      var $option = $(option);
+      var owner = $option.attr('data-parent');
+      if (owner === undefined || parent === '' || owner === parent) {
+        $select.append($option);
+        if ($option.attr('value') === current) { keptCurrent = true; }
+      }
+    });
+
+    $select.val(keptCurrent ? current : '');
+    if ($select.hasClass('select2-hidden-accessible')) { $select.trigger('change.select2'); }
+  }
+
+  function lmsFill($select) {
+    var answers = $select.find('option:selected').attr('data-fills');
+    answers = answers ? JSON.parse(answers) : {};
+
+    $.each(answers, function (target, answer) {
+      var $target = $('#f_' + target);
+      if (!$target.length) { return; }
+
+      var typed = $target.val();
+      var mine = $target.attr('data-filled-by') === $select.attr('id');
+      if (typed !== '' && typed !== undefined && !mine) { return; }
+
+      $target.val(answer).attr('data-filled-by', answer === '' ? null : $select.attr('id'));
+      if ($target.is('select') && $target.hasClass('select2-hidden-accessible')) { $target.trigger('change.select2'); }
+    });
+  }
+
+  $('select[data-depends-on]').each(function () {
+    var $select = $(this);
+    lmsNarrow($select);
+    $('#' + $select.attr('data-depends-on')).on('change', function () { lmsNarrow($select); lmsFill($select); });
+  });
+
+  $('select').filter(function () { return $(this).find('option[data-fills]').length > 0; }).each(function () {
+    var $select = $(this);
+    lmsFill($select);
+    $select.on('change', function () { lmsFill($select); });
+  });
+
+  // Anything the user edits by hand is theirs from then on.
+  $(document).on('input', '[data-filled-by]', function () { $(this).removeAttr('data-filled-by'); });
+  // Choosing a photo shows it straight away, so nobody saves and then wonders
+  // whether the right file went up.
+  $('#avatar').on('change', function () {
+    var file = this.files && this.files[0];
+    if (!file) { return; }
+
+    $('#photoChosen').text(file.name);
+
+    var reader = new FileReader();
+    reader.onload = function (event) {
+      $('#photoInitials').addClass('d-none');
+      $('#photoPreview').attr('src', event.target.result).removeClass('d-none');
+    };
+    reader.readAsDataURL(file);
+  });
+
   // Percentage cells in reports get a subtle bar so a column can be read at a glance.
   $('.lms-pct').each(function () {
     var value = parseFloat($(this).attr('data-value'));

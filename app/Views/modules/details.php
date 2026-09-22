@@ -7,6 +7,15 @@ $fileFields = \Models\LogisticsData::fileFields($moduleKey);
 
 /** Three or four numbers worth seeing before anything else, per module. */
 $highlights = [];
+/** Money in the currency the record itself names, not the company default. */
+$cash = static function (float $amount) use ($record): string {
+    $currencyCode = strtoupper(trim((string) ($record['currency'] ?? '')));
+
+    return $currencyCode === '' || $currencyCode === \Models\Currency::base()
+        ? money($amount, true)
+        : \Models\Currency::format($amount, $currencyCode);
+};
+
 $add = static function (string $label, string $value, string $icon) use (&$highlights): void {
     if (trim($value) !== '') {
         $highlights[] = ['label' => $label, 'value' => $value, 'icon' => $icon];
@@ -23,11 +32,19 @@ switch ($moduleKey) {
         $add('Route', trim((string) $record['pickup_location'] . ' to ' . (string) $record['destination'], ' to '), 'map-pin');
         $add('Vehicle', $display['vehicle_id'] ?: 'Unassigned', 'truck');
         $add('Driver', $display['driver_id'] ?: 'Unassigned', 'user');
+        $load = \Models\LogisticsData::tripLoad((int) $record['id']);
+        $add(
+            $load['loads'] === 1 ? 'Load' : $load['loads'] . ' loads',
+            $load['capacity'] === null
+                ? number_format($load['weight']) . ' kg'
+                : number_format($load['weight']) . ' of ' . number_format($load['capacity']) . ' kg',
+            'box'
+        );
         $add('Planned arrival', (string) $record['planned_arrival_at'], 'clock');
         break;
     case 'shipments':
         $add('Cargo', (string) $record['cargo_description'], 'box');
-        $add('Weight', $record['weight_kg'] !== null ? number_format((float) $record['weight_kg'], 2) . ' kg' : '', 'bar-chart');
+        $add('Weight', $record['weight_kg'] !== null ? rtrim(rtrim(number_format((float) $record['weight_kg'], 2, '.', ','), '0'), '.') . ' kg' : '', 'bar-chart');
         $add('Packages', (string) $record['packages_count'], 'package');
         $add('Temperature', $record['temperature_min_c'] !== null ? $record['temperature_min_c'] . ' to ' . $record['temperature_max_c'] . ' C' : '', 'thermometer');
         break;
@@ -38,13 +55,13 @@ switch ($moduleKey) {
         $add('Proof', $record['proof_file'] ? 'Attached' : 'Missing', 'paperclip');
         break;
     case 'invoices':
-        $add('Total', money((float) $record['total_amount'], true), 'dollar-sign');
-        $add('Paid', money((float) $record['amount_paid'], true), 'check-circle');
-        $add('Balance', money((float) $record['total_amount'] - (float) $record['amount_paid'], true), 'alert-circle');
+        $add('Total', $cash((float) $record['total_amount']), 'dollar-sign');
+        $add('Paid', $cash((float) $record['amount_paid']), 'check-circle');
+        $add('Balance', $cash((float) $record['total_amount'] - (float) $record['amount_paid']), 'alert-circle');
         $add('Due', (string) $record['due_date'], 'calendar');
         break;
     case 'expenses':
-        $add('Amount', money((float) $record['amount'], true), 'dollar-sign');
+        $add('Amount', $cash((float) $record['amount']), 'dollar-sign');
         $add('Category', (string) $record['category'], 'tag');
         $add('Trip', $display['trip_id'] ?: 'Not linked', 'navigation');
         $add('Date', (string) $record['expense_date'], 'calendar');
@@ -67,17 +84,26 @@ switch ($moduleKey) {
         $add('Vehicle', $display['vehicle_id'], 'truck');
         $add('Due', (string) $record['due_date'], 'calendar');
         break;
+    case 'warehouses':
+        // What is physically in the shed, which is the question a depot manager
+        // is actually asked. Our own stock is counted separately below.
+        $held = \Models\CargoCustody::heldAt((int) $record['id']);
+        $add('Location', (string) $record['location'], 'map-pin');
+        $add('Cargo held', $held['loads'] === 0 ? 'Empty' : $held['loads'] . ($held['loads'] === 1 ? ' consignment' : ' consignments'), 'box');
+        $add('Weight in the shed', $held['weight'] > 0 ? rtrim(rtrim(number_format($held['weight'], 2, '.', ','), '0'), '.') . ' kg' : '', 'bar-chart');
+        $add('Packages', $held['packages'] > 0 ? number_format($held['packages']) : '', 'package');
+        break;
     case 'customers':
         $add('Type', $statusLabel === '' ? '' : ($module['fields']['customer_type']['options'][$record['customer_type']] ?? ''), 'briefcase');
         $add('Contact', (string) $record['contact_name'], 'user');
         $add('Terms', (string) $record['payment_terms_days'] . ' days', 'calendar');
-        $add('Credit limit', $record['credit_limit'] !== null ? money((float) $record['credit_limit']) : 'None set', 'dollar-sign');
+        $add('Credit limit', $record['credit_limit'] !== null ? $cash((float) $record['credit_limit']) : 'None set', 'dollar-sign');
         break;
     case 'requests':
         $add('Route', trim((string) $record['pickup_location'] . ' to ' . (string) $record['destination'], ' to '), 'map-pin');
         $add('Required', (string) $record['required_date'], 'calendar');
         $add('Priority', $module['fields']['priority']['options'][$record['priority']] ?? '', 'flag');
-        $add('Weight', $record['weight_kg'] !== null ? number_format((float) $record['weight_kg'], 2) . ' kg' : '', 'bar-chart');
+        $add('Weight', $record['weight_kg'] !== null ? rtrim(rtrim(number_format((float) $record['weight_kg'], 2, '.', ','), '0'), '.') . ' kg' : '', 'bar-chart');
         break;
     case 'drivers':
         $add('Licence', (string) $record['license_number'], 'credit-card');
@@ -236,8 +262,20 @@ if (!empty($record['rejection_reason'])) {
                     <span class="badge badge-<?= e($tone) ?>"><?= e($shown) ?></span>
                   <?php elseif ($shown === ''): ?>
                     <span class="text-muted">Not set</span>
-                  <?php elseif (in_array($field['type'], ['money'], true)): ?>
-                    <?= e(money((float) $record[$name], true)) ?>
+                  <?php elseif ($field['type'] === 'money'): ?>
+                    <?php
+                    /* A record that says which money it is must be shown in that
+                       money. Otherwise a Nairobi quotation reads "RWF" beside a
+                       field that says "KES", and the reader has to guess which
+                       one is lying. */
+                    $currencyCode = strtoupper(trim((string) ($record['currency'] ?? '')));
+                    ?>
+                    <?= e($currencyCode === '' || $currencyCode === \Models\Currency::base()
+                        ? money((float) $record[$name], true)
+                        : \Models\Currency::format((float) $record[$name], $currencyCode)) ?>
+                  <?php elseif ($field['type'] === 'decimal'): ?>
+                    <?php /* 10000.00 is a database value; 10,000 is a weight. */ ?>
+                    <?= e(rtrim(rtrim(number_format((float) $record[$name], 2, '.', ','), '0'), '.')) ?><?= !empty($field['suffix']) ? ' ' . e($field['suffix']) : '' ?>
                   <?php elseif ($field['type'] === 'textarea'): ?>
                     <span class="lms-longtext"><?= nl2br(e($shown)) ?></span>
                   <?php else: ?>
@@ -256,6 +294,7 @@ if (!empty($record['rejection_reason'])) {
           <header class="lms-section-head">
             <div>
               <h3><i class="fe fe-list fe-16 mr-2"></i><?= e($lineSpec['title']) ?></h3>
+              <?php if (isset($lineSpec['hint'])): ?><p><?= e($lineSpec['hint']) ?></p><?php endif; ?>
               <?php if (isset($lineSpec['total_column'])): ?><p>The total is written back to the record whenever these lines are saved.</p><?php endif; ?>
             </div>
           </header>
@@ -270,7 +309,7 @@ if (!empty($record['rejection_reason'])) {
                         <?php foreach ($lineSpec['columns'] as $column => $spec): ?>
                           <th><?= e($spec['label']) ?><?= !empty($spec['required']) ? ' <span class="lms-required">*</span>' : '' ?></th>
                         <?php endforeach; ?>
-                        <th class="text-right">Line total</th>
+                        <?php if (isset($lineSpec['total_column'])): ?><th class="text-right">Line total</th><?php endif; ?>
                         <th></th>
                       </tr>
                     </thead>
@@ -309,7 +348,7 @@ if (!empty($record['rejection_reason'])) {
                               <?php endif; ?>
                             </td>
                           <?php endforeach; ?>
-                          <td class="text-right align-middle lms-line-total"><?= isset($line['line_total']) ? e(money((float) $line['line_total'], true)) : '' ?></td>
+                          <?php if (isset($lineSpec['total_column'])): ?><td class="text-right align-middle lms-line-total"><?= isset($line['line_total']) ? e(money((float) $line['line_total'], true)) : '' ?></td><?php endif; ?>
                           <td class="text-right align-middle"><button type="button" class="btn btn-link btn-sm text-danger p-0 lms-line-clear" title="Clear this line">&times;</button></td>
                         </tr>
                       <?php endforeach; ?>
