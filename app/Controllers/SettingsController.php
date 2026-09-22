@@ -16,10 +16,23 @@ final class SettingsController
 {
     public function index(): void
     {
+        // Branding (who built the system) is credited in the footer automatically;
+        // it is not something day-to-day company admins need to edit here.
         $grouped = [];
         foreach (Settings::editable() as $setting) {
+            if ($setting['setting_group'] === 'Branding') {
+                continue;
+            }
             $grouped[$setting['setting_group']][] = $setting;
         }
+
+        // Company-facing groups first (as tabs), then anything else alphabetically after them.
+        $priority = ['Company', 'Finance', 'Operations', 'Security'];
+        $rank = static function (string $group) use ($priority): int {
+            $position = array_search($group, $priority, true);
+            return $position === false ? 99 : $position;
+        };
+        uksort($grouped, static fn (string $a, string $b): int => $rank($a) <=> $rank($b) ?: $a <=> $b);
 
         \view('admin/settings', [
             'title' => 'Company settings',
