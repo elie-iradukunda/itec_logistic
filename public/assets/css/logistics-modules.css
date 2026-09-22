@@ -207,3 +207,14 @@ body.dark{--lms-line:#3a4149;--lms-muted:#a8b2bb;--lms-ink:#e7ecf0;--lms-surface
   .lms-book td,.lms-book th{padding:.2rem .4rem}
   .lms-book-section td{background:#f1f1f1 !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
 }
+/* company settings: tabbed groups */
+.lms-settings-tabs{background:var(--lms-surface);border:1px solid var(--lms-line);border-bottom:1px solid var(--lms-line);margin-bottom:10px;padding:0 14px;flex-wrap:wrap}
+.lms-settings-tabs .nav-link{border:0;border-bottom:2px solid transparent;border-radius:0;padding:.65rem 1rem;font-size:.85rem;font-weight:600;color:var(--lms-muted)}
+.lms-settings-tabs .nav-link:hover{color:var(--lms-ink);border-bottom-color:var(--lms-line)}
+.lms-settings-tabs .nav-link.active{color:var(--lms-accent);background:transparent;border-bottom-color:var(--lms-accent)}
+.lms-settings-panes{background:var(--lms-surface);border:1px solid var(--lms-line);padding:20px 18px 6px}
+.lms-settings-hint{margin:0 0 16px;font-size:.8rem;color:var(--lms-muted);max-width:78ch}
+
+/* save bar moved to the top of the settings form: same look as the bottom
+   action bar elsewhere, but static and sitting above the tabs, not sticky */
+.lms-form-bar-top{position:static;box-shadow:none;margin:0 0 14px;border-top:0;border:1px solid var(--lms-line)}
