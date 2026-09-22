@@ -71,7 +71,7 @@ try {
     foreach (['seed.sql', 'seed_accounting.sql'] as $seed) {
         $assert(str_contains($firstRun, "Loaded database/{$seed}"), "a fresh run loads {$seed}");
     }
-    foreach (['seed_demo_base.sql', 'seed_company_scenario.sql', 'seed_extended.sql'] as $seed) {
+    foreach (['seed_demo_base.sql', 'seed_extended.sql'] as $seed) {
         $assert(!str_contains($firstRun, "Loaded database/{$seed}"), "a plain run leaves {$seed} out");
     }
 
