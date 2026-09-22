@@ -12,8 +12,6 @@ query live data, and a permission matrix that can actually be edited.
 
 What changed in the 2026-09-20 rebuild, and why, is written up in `README_CHANGES.md`.
 
-The project also includes a full Rwanda company scenario for Kigali Fresh Foods Ltd. It is seeded through `database/seed_company_scenario.sql` and documented in `README_SCENARIO.md`, with one complete request-to-delivery workflow across all roles and sidebar modules.
-
 ## System Overview
 
 LMS is an operational back-office system for an organization that manages transport, fleet assets, deliveries, warehouse stock, procurement and logistics costs. It is not only a landing page or reporting screen; it is a working logistics management workspace where users can sign in, see the modules allowed for their role, create and update records, follow operational status, export reports, receive updates, and keep an audit trail of important actions.
@@ -29,26 +27,6 @@ The system covers the daily logistics cycle from transport demand to delivery co
 7. Finance reviews fuel, expenses, procurement and cost reports.
 8. Management reviews dashboards, KPIs, charts, reports and operational risks.
 9. The system records notifications and audit logs so actions remain accountable.
-
-## Rwanda Company Scenario
-
-The seeded company scenario uses Kigali Fresh Foods Ltd, a fictional Rwanda company that distributes cold-chain school feeding supplies from Kigali Central Warehouse to Huye Depot. It uses the seven database users already listed in this README and gives each role a real job in the same operation:
-
-- Super Admin confirms users and permissions.
-- Warehouse Manager creates demand, checks stock and records procurement.
-- Logistics Manager approves the request and dispatches the trip.
-- Fleet Manager confirms vehicle readiness, maintenance and fuel.
-- Driver completes the trip and delivery proof.
-- Finance approves route cost and reviews spending.
-- Management reviews the final performance report.
-
-The scenario records are seeded with references such as `REQ-KFF-001`, `TRP-KFF-001`, `DEL-KFF-001`, `MNT-KFF-001`, `FUE-KFF-001`, `EXP-KFF-001`, `PR-KFF-001`, and `KFF Huye delivery performance`.
-
-Read the full role-by-role walkthrough in:
-
-```text
-README_SCENARIO.md
-```
 
 ## What The System Does
 
@@ -172,7 +150,6 @@ The goal is to make logistics activity visible, controlled, and accountable from
 | Notifications | Raised by events, markable as read, plus operational alerts refreshed at sign-in. | `tests/workflow.php`, `tests/seed_integrity.php` |
 | Audit trail | Sign-in, record changes, approvals, deletions, downloads and exports, searchable at `/audit`. | `tests/smoke.php`, `tests/http.php` |
 | API | Health, identity, the driver's own work, any permitted module, and closing a delivery. | `tests/http.php` |
-| Company scenario | The Kigali Fresh Foods movement, now including its customer, shipment, route stops and invoice. | `tests/company_scenario.php` |
 | Demo history | `scripts/migrate.php --demo` loads optional trend history. | Verified locally. |
 | GPS and distance | Not built; deliberately left for a later phase. | See "Not Yet Built" |
 
@@ -308,12 +285,6 @@ The seed data is in:
 database/seed.sql
 ```
 
-The Rwanda company workflow scenario seed is in:
-
-```text
-database/seed_company_scenario.sql
-```
-
 The schema creates these tables:
 
 **Fleet** — vehicles, drivers, vehicle_documents, maintenance_orders, maintenance_parts, fuel_records
@@ -394,11 +365,9 @@ after a permission check.
 - `database/seed_demo.sql` - optional demo history (months of trips, expenses, fuel, maintenance) so dashboard trends have data
 - `app/Models/ChartData.php` - dashboard KPI, chart and attention queries
 - `public/assets/js/lms-charts.js` - dashboard chart rendering
-- `README_SCENARIO.md` - role-by-role Rwanda company scenario documentation
 - `tests/smoke.php` - automated smoke test
 - `tests/migrate_fresh.php` - verifies one-command setup on a brand-new database
 - `tests/seed_integrity.php` - full seed, role, notification, and workflow integrity test
-- `tests/company_scenario.php` - verifies the Kigali Fresh Foods Ltd scenario across every role and sidebar module
 - `storage/uploads/` - runtime upload location for proofs, signatures, and receipts
 - `public/assets/` - CSS, JavaScript, images, fonts, and UI assets
 
@@ -445,7 +414,7 @@ Initialize or update the database with one command:
 C:\xampp\php\php.exe scripts\migrate.php
 ```
 
-The migration script creates the database if it does not exist, imports `database/schema.sql` when the database is empty, applies every file in `database/migrations/`, then loads `database/seed.sql` and `database/seed_company_scenario.sql`. Both seed files are idempotent, so running the command again refreshes the starter data and Rwanda company scenario without duplicating seeded records.
+The migration script creates the database if it does not exist, imports `database/schema.sql` when the database is empty, applies every file in `database/migrations/`, then loads `database/seed.sql`. The seed file is idempotent, so running the command again refreshes the starter data without duplicating seeded records.
 
 To load months of demo history so the trend charts have something to show (safe to repeat):
 
@@ -458,7 +427,6 @@ Manual setup is still possible:
 ```text
 C:\xampp\mysql\bin\mysql.exe -u root < database/schema.sql
 C:\xampp\mysql\bin\mysql.exe -u root logistics_mvc < database/seed.sql
-C:\xampp\mysql\bin\mysql.exe -u root logistics_mvc < database/seed_company_scenario.sql
 ```
 
 If your MySQL user has a password, add `-p`:
@@ -466,7 +434,6 @@ If your MySQL user has a password, add `-p`:
 ```text
 C:\xampp\mysql\bin\mysql.exe -u root -p < database/schema.sql
 C:\xampp\mysql\bin\mysql.exe -u root -p logistics_mvc < database/seed.sql
-C:\xampp\mysql\bin\mysql.exe -u root -p logistics_mvc < database/seed_company_scenario.sql
 ```
 
 Environment variables can override database settings:
@@ -490,7 +457,6 @@ C:\xampp\php\php.exe tests\smoke.php
 C:\xampp\php\php.exe tests\seed_integrity.php
 C:\xampp\php\php.exe tests\workflow.php
 C:\xampp\php\php.exe tests\security.php
-C:\xampp\php\php.exe tests\company_scenario.php
 C:\xampp\php\php.exe tests\http.php
 ```
 
@@ -501,7 +467,6 @@ C:\xampp\php\php.exe tests\http.php
 | `seed_integrity.php` | The seed files are idempotent, every table has data, invoice totals match their lines, the stock ledger agrees with every item balance, and no reference code is duplicated. |
 | `workflow.php` | Every status transition, every guard (double booking, cold chain, payload capacity, expired licence, missing reason) and every side effect, plus the stock ledger, invoice totals and trip profitability. |
 | `security.php` | CSRF tokens, login lockout and self-release, password rules, single-use reset tokens, driver row-level scoping, SQL identifier allowlists and upload validation. |
-| `company_scenario.php` | The Kigali Fresh Foods walkthrough: all seven roles find their own records, the reports run, and the driver sees only their own work. |
 | `http.php` | Boots a web server and walks every list, create form, record page, edit form, CSV export, report and API endpoint; then checks that a POST without a CSRF token changes nothing, that a role is refused a module it lacks, that a driver cannot open another driver's trip, and that an upload path cannot escape the uploads folder. |
 
 `tests/support.php` holds the shared harness: `test_database()` builds the throwaway
