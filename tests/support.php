@@ -74,7 +74,6 @@ function test_database(string $prefix, bool $reseedTwice = false, bool $withDemo
         array_push(
             $seeds,
             __DIR__ . '/../database/seed_demo_base.sql',
-            __DIR__ . '/../database/seed_company_scenario.sql',
             __DIR__ . '/../database/seed_extended.sql',
             __DIR__ . '/../database/seed_accounting_demo.sql',
         );
