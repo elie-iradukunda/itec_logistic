@@ -39,7 +39,7 @@ try {
     // ------------------------------------------------------------ idempotency
     $config = require __DIR__ . '/../config/config.php';
     $rewrite = static fn (string $path): string => str_replace('logistics_mvc', $dbName, (string) file_get_contents($path));
-    foreach (['seed.sql', 'seed_company_scenario.sql', 'seed_extended.sql'] as $seed) {
+    foreach (['seed.sql', 'seed_extended.sql'] as $seed) {
         $root->exec($rewrite(__DIR__ . '/../database/' . $seed));
     }
 
