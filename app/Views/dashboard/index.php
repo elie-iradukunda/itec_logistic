@@ -31,11 +31,30 @@
 
   <div class="col-12"><div class="row">
     <div class="col-md-8"><div class="card shadow"><div class="card-body"><table class="table table-hover logistics-data-table" style="font-size:11px"><thead><tr><th colspan="5">Recent Trips and Deliveries</th></tr><tr><th>#</th><th>Reference</th><th>Route</th><th>Vehicle / Driver</th><th>Status</th></tr></thead><tbody><?php foreach ($recentTrips as $index => $trip): ?><tr><td><?= $index + 1 ?></td><td><strong><?= htmlspecialchars($trip['reference']) ?></strong></td><td><?= htmlspecialchars($trip['route']) ?></td><td><?= htmlspecialchars(trim($trip['vehicle'] . ' / ' . $trip['driver'], ' /')) ?></td><td><span class="badge badge-light"><?= htmlspecialchars($trip['status']) ?></span></td></tr><?php endforeach; ?></tbody></table></div></div></div>
-    <div class="col-md-4"><div class="card shadow eq-card timeline"><div class="card-header"><strong class="card-title">Operational attention</strong><span class="float-right small text-muted">Today</span></div><div class="card-body" data-simplebar style="height:360px;overflow-y:auto">
-      <?php foreach ($attention as $index => $item): ?>
-        <div class="pb-3 timeline-item"><span class="circle circle-sm bg-<?= htmlspecialchars($item['tone']) ?> h3 mb-0"><?= $index + 1 ?></span><div class="pl-5"><div class="mb-1 small"><strong><?= htmlspecialchars($item['title']) ?></strong></div><p class="small text-muted"><?= htmlspecialchars($item['text']) ?></p></div></div>
-      <?php endforeach; ?>
-    </div></div></div>
+    <?php
+      $attentionIcons = ['warning' => 'alert-triangle', 'critical' => 'alert-octagon', 'success' => 'check-circle', 'primary' => 'navigation'];
+      $attentionOpen = array_filter($attention, static fn (array $item): bool => $item['tone'] !== 'success');
+    ?>
+    <div class="col-md-4"><div class="card shadow eq-card lms-attention-card">
+      <div class="card-header d-flex align-items-center justify-content-between">
+        <strong class="card-title mb-0">Operational attention</strong>
+        <?php if ($attentionOpen !== []): ?><span class="badge badge-pill lms-attention-count"><?= count($attentionOpen) ?> open</span><?php else: ?><span class="small text-muted">All clear</span><?php endif; ?>
+      </div>
+      <div class="lms-attention-list" data-simplebar style="max-height:360px;overflow-y:auto">
+        <?php if ($attention === []): ?>
+          <div class="lms-attention-empty"><i class="fe fe-check-circle fe-24"></i><p>Nothing needs attention right now.</p></div>
+        <?php endif; ?>
+        <?php foreach ($attention as $item): ?>
+          <div class="lms-attention-item lms-attention-<?= htmlspecialchars($item['tone']) ?>">
+            <span class="lms-attention-icon"><i class="fe fe-<?= htmlspecialchars($attentionIcons[$item['tone']] ?? 'info') ?> fe-16"></i></span>
+            <div class="lms-attention-body">
+              <strong><?= htmlspecialchars($item['title']) ?></strong>
+              <p><?= htmlspecialchars($item['text']) ?></p>
+            </div>
+          </div>
+        <?php endforeach; ?>
+      </div>
+    </div></div>
   </div></div>
 </div>
 <?php require __DIR__ . '/../layouts/footer.php'; ?>
