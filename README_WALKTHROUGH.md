@@ -1346,7 +1346,6 @@ C:\xampp\php\php.exe tests\workflow.php
 C:\xampp\php\php.exe tests\accounting.php
 C:\xampp\php\php.exe tests\security.php
 C:\xampp\php\php.exe tests\seed_integrity.php
-C:\xampp\php\php.exe tests\company_scenario.php
 ```
 
 # Starting again
