@@ -258,16 +258,12 @@ function company_name(): string
  * Who built the system, as opposed to who is using it.
  *
  * LMS is installed for more than one company, so the footer credits the vendor
- * rather than repeating the customer's own name back at them. It is a setting,
- * so a reseller can put their own name on it.
+ * rather than repeating the customer's own name back at them. Fixed in code on
+ * purpose, not a company_settings row: this is not the installer's to change.
  */
 function vendor_name(): string
 {
-    try {
-        return \Models\Settings::get('vendor_name', 'ITEC Ltd');
-    } catch (\Throwable) {
-        return 'ITEC Ltd';
-    }
+    return 'ITEC LTD';
 }
 
 function time_ago(?string $datetime): string
