@@ -120,7 +120,6 @@ if ($withDemo) {
     array_push(
         $seedFiles,
         __DIR__ . '/../database/seed_demo_base.sql',
-        __DIR__ . '/../database/seed_company_scenario.sql',
         __DIR__ . '/../database/seed_extended.sql',
         __DIR__ . '/../database/seed_accounting_demo.sql',
         __DIR__ . '/../database/seed_demo.sql',
